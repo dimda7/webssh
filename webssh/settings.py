@@ -5,7 +5,7 @@ import ssl
 import sys
 
 from tornado.options import define
-from webssh.signin import ConfigError, SignInLimiter, UserStore
+from webssh.signin import ConfigError, SignInLimiter, UserStore, dummy_hash
 from webssh.policy import (
     load_host_keys, get_policy_class, check_policy_setting
 )
@@ -121,6 +121,16 @@ def get_signin_settings(options):
     user_store = UserStore(options.authdb)
     user_store.bootstrap(os.environ.get('WSSH_INIT_USER', ''),
                          os.environ.get('WSSH_INIT_PASSWORD', ''))
+    # computed now, not on the first unknown username, so that sign-in
+    # takes the same time for unknown usernames from the start
+    dummy_hash()
+    if options.xheaders and not options.tdstream:
+        logging.warning(
+            'Sign-in attempts are limited per client IP, and with xheaders '
+            'on the client can set it in X-Real-Ip/X-Forwarded-For. Run '
+            'with --xheaders=False unless a proxy sets these headers, or '
+            'list the proxy in --tdstream.'
+        )
     return dict(
         signin_enabled=True,
         cookie_secret=cookie_secret,

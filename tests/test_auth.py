@@ -288,6 +288,32 @@ class TestSignInAttemptLimit(SignInTestBase):
             self.sign_in(password='wrong')
         self.assertEqual(self.sign_in().code, 303)
 
+    def test_concurrent_attempts_count_towards_the_limit(self):
+        body = urlencode(dict(username=self.init_user, password='wrong',
+                              _xsrf='yummy'))
+
+        @tornado.gen.coroutine
+        def burst():
+            responses = yield [self.http_client.fetch(
+                self.get_url('/auth/signin'), method='POST', body=body,
+                headers={'Cookie': '_xsrf=yummy'}, raise_error=False
+            ) for _ in range(20)]
+            return [r.body for r in responses]
+
+        bodies = self.io_loop.run_sync(burst, timeout=60)
+        checked = [b for b in bodies if b'Invalid username' in b]
+        self.assertEqual(len(checked), 5)
+
+    def test_own_sign_in_does_not_clear_attempts_against_others(self):
+        for _ in range(4):
+            self.sign_in(username='bob', password='wrong')
+        self.assertEqual(self.sign_in().code, 303)
+        self.jar.pop('wssh_session')
+
+        self.sign_in(username='bob', password='wrong')
+        response = self.sign_in(username='bob', password='wrong')
+        self.assertIn(b'Too many attempts, try later', response.body)
+
     def test_successful_sign_in_below_the_limit(self):
         for _ in range(4):
             self.sign_in(password='wrong')
@@ -352,6 +378,26 @@ class TestSignInStartup(unittest.TestCase):
 
     def test_refuses_to_start_with_no_users_and_no_init_env(self):
         self.assert_refuses_to_start({}, 'WSSH_INIT_USER')
+
+    def test_warns_when_client_headers_can_pick_the_ip(self):
+        options.xheaders = True
+        options.tdstream = ''
+        env = dict(WSSH_INIT_USER='alice', WSSH_INIT_PASSWORD='wonderland')
+        with mock.patch.dict(os.environ, env, clear=True):
+            with self.assertLogs(level='WARNING') as logs:
+                get_app_settings(options)
+        self.assertIn('--xheaders=False', '\n'.join(logs.output))
+
+    def test_no_xheaders_warning_behind_trusted_downstream(self):
+        options.xheaders = True
+        options.tdstream = '127.0.0.1'
+        env = dict(WSSH_INIT_USER='alice', WSSH_INIT_PASSWORD='wonderland')
+        try:
+            with mock.patch.dict(os.environ, env, clear=True):
+                with self.assertNoLogs(level='WARNING'):
+                    get_app_settings(options)
+        finally:
+            options.tdstream = ''
 
     def test_sign_in_stays_off_without_authdb(self):
         options.authdb = ''
@@ -425,3 +471,15 @@ class TestConnectAfterSignIn(SignInTestBase):
 
         msg = self.io_loop.run_sync(read_banner)
         self.assertEqual(to_str(msg, data['encoding']), banner)
+
+
+class TestSignInPasswordIsTakenVerbatim(SignInTestBase):
+
+    init_password = ' s3cret\tword '
+
+    def test_password_with_spaces_and_tab_signs_in(self):
+        self.assertEqual(self.sign_in().code, 303)
+
+    def test_trimmed_password_is_rejected(self):
+        response = self.sign_in(password='s3cret word')
+        self.assertIn(b'Invalid username or password', response.body)

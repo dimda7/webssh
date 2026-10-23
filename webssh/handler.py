@@ -403,21 +403,31 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
             self.render('signin.html', error=self.blocked_message)
             return
 
+        username = self.get_argument('username', u'')
+        # counted before bcrypt runs, so concurrent attempts can not slip
+        # past the limit while earlier ones are still being checked
+        limiter.add_attempt(ip, username)
+
         # the sqlite3 connection belongs to the IOLoop thread, bcrypt does not
-        user = self.settings['user_store'].find(
-            self.get_argument('username', u'')
-        )
+        user = self.settings['user_store'].find(username)
         matched = yield self.executor.submit(
-            check_password, user, self.get_argument('password', u'')
+            check_password, user, self.get_raw_password()
         )
         if not matched:
-            limiter.add_failure(ip)
             self.render('signin.html', error=self.error_message)
             return
 
-        limiter.reset(ip)
+        limiter.forget(ip, username)
         self.save_session(Session.for_user(user))
         self.redirect('/', status=303)
+
+    def get_raw_password(self):
+        # get_argument() strips spaces and turns control characters into
+        # spaces, which would change the password
+        values = self.request.body_arguments.get('password')
+        if not values:
+            return u''
+        return self.decode_argument(values[-1], name='password')
 
 
 class SignOutHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):

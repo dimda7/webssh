@@ -49,17 +49,16 @@
   <body>
     <div id="waiter" style="display: none"> Connecting ... </div>
 
-    {% if session %}
-    <div class="container signed-in">
-      <form id="signout" action="{{ signout_url }}" method="post">
-        {{ session.fullname }} &middot;
-        {% module xsrf_form_html() %}
-        <button type="submit" class="btn btn-link">Sign out</button>
-      </form>
-    </div>
-    {% end %}
-
     <div class="container form-container" style="display: none">
+      {% if session %}
+      <div class="signed-in">
+        <form id="signout" action="{{ signout_url }}" method="post">
+          {{ session.fullname }} &middot;
+          {% module xsrf_form_html() %}
+          <button type="submit" class="btn btn-link">Sign out</button>
+        </form>
+      </div>
+      {% end %}
       <form id="connect" action="" method="post" enctype="multipart/form-data"{% if debug %} novalidate{% end %}>
         <div class="row">
           <div class="col">

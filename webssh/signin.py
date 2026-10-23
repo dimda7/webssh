@@ -155,29 +155,38 @@ class Session(object):
 
 
 class SignInLimiter(object):
-    """Counts failed sign-ins per client IP within a sliding window."""
+    """Counts sign-in attempts per client IP within a sliding window.
+
+    An attempt counts from the moment it starts; a successful one is
+    forgotten, together with earlier failures for the same username only.
+    """
 
     limit = 5
     window = 300
 
     def __init__(self):
-        self.failures = {}
+        self.attempts = {}
 
     def prune(self):
         threshold = time.time() - self.window
-        for ip in list(self.failures):
-            failures = self.failures[ip]
-            while failures and failures[0] < threshold:
-                failures.popleft()
-            if not failures:
-                del self.failures[ip]
+        for ip in list(self.attempts):
+            attempts = self.attempts[ip]
+            while attempts and attempts[0][0] < threshold:
+                attempts.popleft()
+            if not attempts:
+                del self.attempts[ip]
 
     def is_blocked(self, ip):
         self.prune()
-        return len(self.failures.get(ip, ())) >= self.limit
+        return len(self.attempts.get(ip, ())) >= self.limit
 
-    def add_failure(self, ip):
-        self.failures.setdefault(ip, deque()).append(time.time())
+    def add_attempt(self, ip, username):
+        self.attempts.setdefault(ip, deque()).append((time.time(), username))
 
-    def reset(self, ip):
-        self.failures.pop(ip, None)
+    def forget(self, ip, username):
+        attempts = deque(a for a in self.attempts.get(ip, ())
+                         if a[1] != username)
+        if attempts:
+            self.attempts[ip] = attempts
+        else:
+            self.attempts.pop(ip, None)
