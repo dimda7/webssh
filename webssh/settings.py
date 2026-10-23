@@ -5,7 +5,7 @@ import ssl
 import sys
 
 from tornado.options import define
-from webssh.signin import SignInLimiter, UserStore
+from webssh.signin import ConfigError, SignInLimiter, UserStore
 from webssh.policy import (
     load_host_keys, get_policy_class, check_policy_setting
 )
@@ -104,7 +104,7 @@ def get_app_settings(options):
 def get_cookie_secret(options):
     secret = options.cookiesecret or os.environ.get('WSSH_COOKIE_SECRET', '')
     if not secret:
-        raise ValueError(
+        raise ConfigError(
             'Sign-in needs --cookiesecret or WSSH_COOKIE_SECRET'
         )
     try:
@@ -112,7 +112,7 @@ def get_cookie_secret(options):
     except ValueError:
         size = None
     if size != 32:
-        raise ValueError('Cookie secret must be 32 bytes in hex')
+        raise ConfigError('Cookie secret must be 32 bytes in hex')
     return secret
 
 

@@ -28,6 +28,12 @@
       .signed-in {
         text-align: right;
       }
+
+      .signed-in .btn {
+        margin-top: 0;
+        padding: 0;
+        vertical-align: baseline;
+      }
       {% if font.family %}
       @font-face {
         font-family: '{{ font.family }}';
@@ -45,8 +51,11 @@
 
     {% if session %}
     <div class="container signed-in">
-      {{ session.fullname }}
-      &middot; <a href="{{ signout_url }}">Sign out</a>
+      <form id="signout" action="{{ signout_url }}" method="post">
+        {{ session.fullname }} &middot;
+        {% module xsrf_form_html() %}
+        <button type="submit" class="btn btn-link">Sign out</button>
+      </form>
     </div>
     {% end %}
 

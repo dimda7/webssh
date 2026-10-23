@@ -17,7 +17,7 @@ from tornado.httpclient import HTTPClientError, HTTPRequest
 from tornado.testing import AsyncHTTPTestCase, gen_test
 from tornado.options import options
 from tests.sshserver import run_ssh_server, banner
-from webssh.signin import hash_password
+from webssh.signin import ConfigError, hash_password
 from webssh.main import make_app, make_handlers
 from webssh.settings import get_app_settings, get_server_settings
 from webssh.utils import to_str
@@ -182,13 +182,43 @@ class TestSignIn(SignInTestBase):
 
     def test_sign_out_ends_session(self):
         self.sign_in()
-        response = self.request('/auth/signout')
+        response = self.request('/auth/signout', 'POST', dict(_xsrf='yummy'))
         self.assertEqual(response.code, 303)
         self.assertEqual(response.headers['Location'], '/auth/signin')
 
         response = self.request('/')
         self.assertEqual(response.code, 303)
         self.assertEqual(response.headers['Location'], '/auth/signin')
+
+    def test_sign_out_needs_post_with_xsrf_token(self):
+        self.sign_in()
+        self.assertEqual(self.request('/auth/signout').code, 405)
+        response = self.request('/auth/signout', 'POST', '')
+        self.assertEqual(response.code, 403)
+        self.assertEqual(self.request('/').code, 200)
+
+    def test_session_cookie_ends_with_the_browser(self):
+        self.sign_in()
+        response = self.request('/')
+        cookie = [c for c in response.headers.get_list('Set-Cookie')
+                  if c.startswith('wssh_session=')][0]
+        self.assertNotIn('expires', cookie.lower())
+        self.assertNotIn('max-age', cookie.lower())
+
+    def test_deactivated_user_loses_access(self):
+        self.sign_in()
+        conn = sqlite3.connect(self.authdb)
+        with conn:
+            conn.execute('UPDATE users SET active = 0 WHERE username = ?',
+                         (self.init_user,))
+        conn.close()
+
+        response = self.request('/')
+        self.assertEqual(response.code, 303)
+        self.assertEqual(response.headers['Location'], '/auth/signin')
+
+    def test_password_longer_than_bcrypt_limit_is_rejected(self):
+        self.assert_signin_rejected(self.sign_in(password='я' * 40))
 
     def test_sign_in_without_xsrf_token_is_forbidden(self):
         response = self.request('/auth/signin', 'POST', dict(
@@ -248,6 +278,16 @@ class TestSignInAttemptLimit(SignInTestBase):
         self.assertIn(b'Too many attempts, try later', response.body)
         self.assertNotIn('wssh_session', self.jar)
 
+    def test_successful_sign_in_resets_failed_attempts(self):
+        for _ in range(4):
+            self.sign_in(password='wrong')
+        self.assertEqual(self.sign_in().code, 303)
+        self.jar.pop('wssh_session')
+
+        for _ in range(4):
+            self.sign_in(password='wrong')
+        self.assertEqual(self.sign_in().code, 303)
+
     def test_successful_sign_in_below_the_limit(self):
         for _ in range(4):
             self.sign_in(password='wrong')
@@ -271,7 +311,7 @@ class TestSignInStartup(unittest.TestCase):
 
     def assert_refuses_to_start(self, env, message):
         with mock.patch.dict(os.environ, env, clear=True):
-            with self.assertRaises(ValueError) as ctx:
+            with self.assertRaises(ConfigError) as ctx:
                 get_app_settings(options)
         self.assertIn(message, str(ctx.exception))
 
@@ -296,6 +336,19 @@ class TestSignInStartup(unittest.TestCase):
         with mock.patch.dict(os.environ, env, clear=True):
             settings = get_app_settings(options)
         self.assertEqual(settings['cookie_secret'], 'cd' * 32)
+
+    def test_refuses_to_start_with_unopenable_authdb(self):
+        options.authdb = os.path.join(self.tmpdir, 'missing', 'users.db')
+        self.assert_refuses_to_start(
+            dict(WSSH_INIT_USER='alice', WSSH_INIT_PASSWORD='wonderland'),
+            'missing'
+        )
+
+    def test_refuses_to_start_with_too_long_init_password(self):
+        self.assert_refuses_to_start(
+            dict(WSSH_INIT_USER='alice', WSSH_INIT_PASSWORD='x' * 73),
+            '72 bytes'
+        )
 
     def test_refuses_to_start_with_no_users_and_no_init_env(self):
         self.assert_refuses_to_start({}, 'WSSH_INIT_USER')
@@ -348,7 +401,7 @@ class TestConnectAfterSignIn(SignInTestBase):
         self.sign_in()
         response = self.request('/')
         self.assertIn(b'alice', response.body)
-        self.assertIn(b'href="/auth/signout"', response.body)
+        self.assertIn(b'action="/auth/signout"', response.body)
 
     def test_signed_in_user_can_open_terminal(self):
         self.sign_in()

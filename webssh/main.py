@@ -9,6 +9,7 @@ from webssh.handler import (
     IndexHandler, WsockHandler, NotFoundHandler, SignInHandler,
     SignOutHandler, SIGNIN_URL, SIGNOUT_URL
 )
+from webssh.signin import ConfigError
 from webssh.settings import (
     get_app_settings,  get_host_keys_settings, get_policy_setting,
     get_ssl_context, get_server_settings, check_encoding_setting
@@ -56,7 +57,7 @@ def main():
     try:
         app = make_app(make_handlers(loop, options),
                        get_app_settings(options))
-    except ValueError as exc:
+    except ConfigError as exc:
         # a misconfiguration, not a bug: no traceback for the operator
         logging.error(exc)
         sys.exit(1)

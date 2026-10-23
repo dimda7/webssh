@@ -1,12 +1,16 @@
+import functools
 import json
 import logging
 import sqlite3
 import time
 
-from collections import defaultdict, deque
+from collections import deque
 
 import bcrypt
 
+
+# bcrypt only looks at the first 72 bytes and bcrypt>=5 refuses longer input
+MAX_PASSWORD_BYTES = 72
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS users (
@@ -19,6 +23,10 @@ CREATE TABLE IF NOT EXISTS users (
     active BOOLEAN NOT NULL DEFAULT 1
 )
 '''
+
+
+class ConfigError(Exception):
+    """Sign-in is misconfigured, webssh can not start."""
 
 
 class User(object):
@@ -42,9 +50,12 @@ class UserStore(object):
 
     def __init__(self, path):
         self.path = path
-        self.conn = sqlite3.connect(path)
-        with self.conn:
-            self.conn.execute(SCHEMA)
+        try:
+            self.conn = sqlite3.connect(path)
+            with self.conn:
+                self.conn.execute(SCHEMA)
+        except sqlite3.Error as exc:
+            raise ConfigError('Can not open {!r}: {}'.format(path, exc))
 
     def is_empty(self):
         return self.conn.execute('SELECT 1 FROM users LIMIT 1').fetchone() \
@@ -57,12 +68,18 @@ class UserStore(object):
                 (username, hash_password(password))
             )
 
-    def find(self, username):
+    def _find_by(self, column, value):
         row = self.conn.execute(
             'SELECT id, username, firstname, lastname, middlename, password, '
-            'active FROM users WHERE username = ?', (username,)
+            'active FROM users WHERE {} = ?'.format(column), (value,)
         ).fetchone()
         return User(*row) if row else None
+
+    def find(self, username):
+        return self._find_by('username', username)
+
+    def find_by_id(self, user_id):
+        return self._find_by('id', user_id)
 
     def bootstrap(self, username, password):
         """Creates the first user, if the table is empty."""
@@ -74,28 +91,34 @@ class UserStore(object):
             return
 
         if not username or not password:
-            raise ValueError(
+            raise ConfigError(
                 'No users in {!r} and WSSH_INIT_USER/WSSH_INIT_PASSWORD '
                 'not set'.format(self.path)
             )
+        if len(password.encode()) > MAX_PASSWORD_BYTES:
+            raise ConfigError('WSSH_INIT_PASSWORD must be at most {} bytes'
+                              .format(MAX_PASSWORD_BYTES))
         self.add(username, password)
         logging.info('Created user {!r}'.format(username))
 
 
-# checked against when there is no such user, so that the response time
-# does not tell which usernames exist
-DUMMY_HASH = hash_password('webssh-dummy-password')
+@functools.lru_cache(maxsize=None)
+def dummy_hash():
+    return hash_password('webssh-dummy-password')
 
 
-def verify_sign_in(user_store, username, password):
-    """Returns the active user with this username and password, or None."""
-    user = user_store.find(username)
-    hashed = user and user.password
-    matched = bcrypt.checkpw(password.encode(),
-                             (hashed or DUMMY_HASH).encode())
-    if hashed and matched and user.active:
-        return user
-    return None
+def check_password(user, password):
+    """True if the user is active and the password is theirs.
+
+    bcrypt runs even when there is no such user, so that the response time
+    does not tell which usernames exist. Slow: keep it off the IOLoop.
+    """
+    secret = password.encode()
+    if len(secret) > MAX_PASSWORD_BYTES:
+        return False
+    hashed = user.password if user else None
+    matched = bcrypt.checkpw(secret, (hashed or dummy_hash()).encode())
+    return bool(hashed and matched and user.active)
 
 
 class Session(object):
@@ -138,19 +161,23 @@ class SignInLimiter(object):
     window = 300
 
     def __init__(self):
-        self.failures = defaultdict(deque)
+        self.failures = {}
 
-    def count_recent_failures(self, ip):
-        failures = self.failures[ip]
+    def prune(self):
         threshold = time.time() - self.window
-        while failures and failures[0] < threshold:
-            failures.popleft()
-        if not failures:
-            del self.failures[ip]
-        return len(failures)
+        for ip in list(self.failures):
+            failures = self.failures[ip]
+            while failures and failures[0] < threshold:
+                failures.popleft()
+            if not failures:
+                del self.failures[ip]
 
     def is_blocked(self, ip):
-        return self.count_recent_failures(ip) >= self.limit
+        self.prune()
+        return len(self.failures.get(ip, ())) >= self.limit
 
     def add_failure(self, ip):
-        self.failures[ip].append(time.time())
+        self.failures.setdefault(ip, deque()).append(time.time())
+
+    def reset(self, ip):
+        self.failures.pop(ip, None)

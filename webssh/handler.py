@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from tornado.ioloop import IOLoop
 from tornado.options import options
 from tornado.process import cpu_count
-from webssh.signin import Session, verify_sign_in
+from webssh.signin import Session, check_password
 from webssh.utils import (
     is_valid_ip_address, is_valid_port, is_valid_hostname, to_bytes, to_str,
     to_int, to_ip_address, UnicodeType, is_ip_hostname, is_same_primary_domain,
@@ -317,15 +317,21 @@ class SessionMixin(object):
         """
         value = self.get_signed_cookie(self.session_cookie)
         session = Session.from_json(value) if value else None
-        if session and session.is_expired(self.settings['signin_timeout']):
+        if not session:
+            return None
+
+        user = self.settings['user_store'].find_by_id(session.user_id)
+        if not user or not user.active or \
+                session.is_expired(self.settings['signin_timeout']):
             self.clear_cookie(self.session_cookie)
             return None
         return session
 
     def save_session(self, session):
         self.set_signed_cookie(
-            self.session_cookie, session.to_json(), httponly=True,
-            samesite='Lax', secure=self.request.protocol == 'https'
+            self.session_cookie, session.to_json(), expires_days=None,
+            httponly=True, samesite='Lax',
+            secure=self.request.protocol == 'https'
         )
 
 
@@ -378,6 +384,8 @@ class SignInRequiredMixin(SessionMixin):
 
 class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
+    executor = ThreadPoolExecutor(max_workers=cpu_count())
+
     error_message = 'Invalid username or password'
     blocked_message = 'Too many attempts, try later'
 
@@ -387,6 +395,7 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
             return
         self.render('signin.html', error=None)
 
+    @tornado.gen.coroutine
     def post(self):
         ip = self.get_client_addr()[0]
         limiter = self.settings['signin_limiter']
@@ -394,21 +403,26 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
             self.render('signin.html', error=self.blocked_message)
             return
 
-        user = verify_sign_in(self.settings['user_store'],
-                              self.get_argument('username', u''),
-                              self.get_argument('password', u''))
-        if not user:
+        # the sqlite3 connection belongs to the IOLoop thread, bcrypt does not
+        user = self.settings['user_store'].find(
+            self.get_argument('username', u'')
+        )
+        matched = yield self.executor.submit(
+            check_password, user, self.get_argument('password', u'')
+        )
+        if not matched:
             limiter.add_failure(ip)
             self.render('signin.html', error=self.error_message)
             return
 
+        limiter.reset(ip)
         self.save_session(Session.for_user(user))
         self.redirect('/', status=303)
 
 
 class SignOutHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
-    def get(self):
+    def post(self):
         self.clear_cookie(self.session_cookie)
         self.redirect(SIGNIN_URL, status=303)
 
