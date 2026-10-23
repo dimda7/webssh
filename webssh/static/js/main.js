@@ -60,6 +60,7 @@ jQuery(function($){
       url_form_data = {},
       url_opts_data = {},
       validated_form_data,
+      pending_key,
       event_origin,
       hostname_tester = /((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))\s*$)|(^\s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?\s*$))|(^\s*((?=.{1,255}$)(?=.*[A-Za-z].*)[0-9A-Za-z](?:(?:[0-9A-Za-z]|\b-){0,61}[0-9A-Za-z])?(?:\.[0-9A-Za-z](?:(?:[0-9A-Za-z]|\b-){0,61}[0-9A-Za-z])?)*)\s*$)/;
 
@@ -86,6 +87,51 @@ jQuery(function($){
       if (value) {
         $('#'+name).val(value);
       }
+    }
+  }
+
+
+  function store_key(key) {
+    window.localStorage.setItem('privatekey', key.text);
+    window.localStorage.setItem('privatekey_name', key.name);
+    if (key.passphrase) {
+      window.localStorage.setItem('passphrase', key.passphrase);
+    } else {
+      // do not keep the passphrase of a previous key
+      window.localStorage.removeItem('passphrase');
+    }
+  }
+
+
+  function restore_key() {
+    var text = window.localStorage.getItem('privatekey'),
+        name = window.localStorage.getItem('privatekey_name') || 'privatekey',
+        transfer;
+
+    if (!text) {
+      return;
+    }
+
+    try {
+      transfer = new window.DataTransfer();
+      transfer.items.add(new window.File([text], name, {type: 'text/plain'}));
+      document.getElementById('privatekey').files = transfer.files;
+    } catch (e) {
+      // file inputs can not be populated in this browser
+      console.log('Unable to restore the private key');
+      return;
+    }
+
+    $('#passphrase').val(window.localStorage.getItem('passphrase') || '');
+  }
+
+
+  function forget_key() {
+    var names = ['privatekey', 'privatekey_name', 'passphrase'],
+        i;
+
+    for (i = 0; i < names.length; i++) {
+      window.localStorage.removeItem(names[i]);
     }
   }
 
@@ -345,6 +391,9 @@ jQuery(function($){
   function ajax_complete_callback(resp) {
     button.prop('disabled', false);
 
+    var key = pending_key;
+    pending_key = undefined;
+
     if (resp.status !== 200) {
       log_status(resp.status + ': ' + resp.statusText, true);
       state = DISCONNECTED;
@@ -356,6 +405,11 @@ jQuery(function($){
       log_status(msg.status, true);
       state = DISCONNECTED;
       return;
+    }
+
+    // the server has authenticated, so the key is known to work
+    if (key) {
+      store_key(key);
     }
 
     var ws_url = window.location.href.split(/\?|#/, 1)[0].replace('http', 'ws'),
@@ -385,6 +439,108 @@ jQuery(function($){
 
     term.fitAddon = new window.FitAddon.FitAddon();
     term.loadAddon(term.fitAddon);
+
+    var pending_clipboard;
+
+    function copy_with_exec_command(text) {
+      var textarea = document.createElement('textarea'),
+          copied = false;
+
+      textarea.value = text;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        copied = document.execCommand('copy');
+      } catch (err) {
+        copied = false;
+      }
+      document.body.removeChild(textarea);
+      if (term) {
+        term.focus();
+      }
+      return copied;
+    }
+
+    function copy_to_clipboard(text) {
+      if (!text) {
+        return;
+      }
+
+      // execCommand works inside a user gesture even without a trusted
+      // certificate, so try it first
+      if (copy_with_exec_command(text)) {
+        return;
+      }
+
+      if (window.navigator.clipboard && window.isSecureContext) {
+        window.navigator.clipboard.writeText(text).catch(function() {
+          // needs a user gesture, retry on the next one
+          pending_clipboard = text;
+        });
+      } else {
+        pending_clipboard = text;
+      }
+    }
+
+    function flush_pending_clipboard() {
+      var text = pending_clipboard;
+
+      if (text) {
+        pending_clipboard = undefined;
+        if (!copy_with_exec_command(text)) {
+          console.log('Unable to copy text to clipboard');
+        }
+      }
+    }
+
+    function decode_base64(data) {
+      var binary = window.atob(data),
+          bytes = new window.Uint8Array(binary.length),
+          i;
+
+      for (i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+
+      if (!window.TextDecoder) {
+        return binary;
+      }
+      return new window.TextDecoder('utf-8').decode(bytes);
+    }
+
+    // OSC 52: let the remote program set the browser clipboard
+    term.parser.addOscHandler(52, function(data) {
+      var payload = data.slice(data.indexOf(';') + 1);
+
+      if (payload === '?') {
+        // reading the clipboard is not allowed
+        return true;
+      }
+
+      try {
+        copy_to_clipboard(decode_base64(payload));
+      } catch (err) {
+        console.log('Invalid OSC 52 data');
+      }
+      return true;
+    });
+
+    // copy on select
+    terminal.addEventListener('mouseup', function() {
+      if (!term) {
+        return;
+      }
+      if (term.hasSelection()) {
+        pending_clipboard = undefined;
+        copy_to_clipboard(term.getSelection());
+      } else {
+        flush_pending_clipboard();
+      }
+    });
+
+    terminal.addEventListener('keydown', flush_pending_clipboard, true);
 
     console.log(url);
     if (!msg.encoding) {
@@ -706,6 +862,11 @@ jQuery(function($){
         if (text === undefined) {
             log_status('Invalid private key: ' + pk.name);
         } else {
+          pending_key = {
+            text: text,
+            name: pk.name,
+            passphrase: data.get('passphrase')
+          };
           ajax_post();
         }
       });
@@ -758,6 +919,8 @@ jQuery(function($){
       return;
     }
 
+    pending_key = undefined;
+
     if (hostname === undefined) {
       result = connect_without_options();
     } else {
@@ -794,6 +957,8 @@ jQuery(function($){
     event.preventDefault();
     connect();
   });
+
+  $(form_id).on('reset', forget_key);
 
 
   function cross_origin_connect(event)
@@ -852,6 +1017,7 @@ jQuery(function($){
       connect(url_form_data);
     } else {
       restore_items(fields);
+      restore_key();
       form_container.show();
     }
   }

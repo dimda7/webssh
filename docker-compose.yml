@@ -2,5 +2,9 @@ version: '3'
 services:
   web:
     build: .
+    command: ["python", "run.py", "--certfile=/certs/webssh.crt", "--keyfile=/certs/webssh.key", "--sslport=4433"]
+    volumes:
+    - ./certs:/certs:ro
     ports:
     - "8888:8888"
+    - "4433:4433"
