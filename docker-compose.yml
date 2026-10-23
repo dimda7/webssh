@@ -8,7 +8,6 @@ services:
     - ./certs:/certs:ro
     - webssh-data:/data
     ports:
-    - "8888:8888"
     - "4433:4433"
 volumes:
   webssh-data:
