@@ -439,6 +439,16 @@ class TestSignInStartup(unittest.TestCase):
             '72 bytes'
         )
 
+    def test_init_user_follows_the_same_rules_as_the_users_page(self):
+        self.assert_refuses_to_start(
+            dict(WSSH_INIT_USER='alice', WSSH_INIT_PASSWORD='short'),
+            'at least 8 characters'
+        )
+        self.assert_refuses_to_start(
+            dict(WSSH_INIT_USER='alice smith', WSSH_INIT_PASSWORD='password1'),
+            'Username must be'
+        )
+
     def test_refuses_to_start_with_no_users_and_no_init_env(self):
         self.assert_refuses_to_start({}, 'WSSH_INIT_USER')
 

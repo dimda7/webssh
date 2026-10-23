@@ -88,6 +88,10 @@ class LastAdministrator(Exception):
     """The change would leave no active Administrator."""
 
 
+class UserGone(Exception):
+    """The User was removed from the DB, by hand or by another writer."""
+
+
 def hash_password(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
@@ -162,7 +166,9 @@ class UserStore(object):
                     (username, password_hash, int(is_administrator))
                     + names.values()
                 )
-        except sqlite3.IntegrityError:
+        except sqlite3.IntegrityError as exc:
+            if 'UNIQUE' not in str(exc):
+                raise
             raise UsernameTaken(username)
 
     def is_username_taken(self, username):
@@ -194,30 +200,38 @@ class UserStore(object):
                 'WHERE id = ?', (user_id,)
             )
 
-    def _set_flag(self, column, user_id, value):
+    def _set_flag(self, column, user_id, value, also=''):
         """Sets active or is_admin, keeping an active Administrator.
 
         Turning a flag off is one statement that also checks another
         active Administrator remains, so that it holds even with other
-        writers on the same DB file.
+        writers on the same DB file. `also` adds more assignments.
         """
         with self.conn:
             if value:
-                self.conn.execute('UPDATE users SET {} = 1 WHERE id = ?'
-                                  .format(column), (user_id,))
-                return
-            changed = self.conn.execute(
-                'UPDATE users SET {column} = 0 WHERE id = ? AND (NOT '
-                '{active_admin} OR EXISTS (SELECT 1 FROM users WHERE '
-                'id != ? AND {active_admin}))'.format(
-                    column=column, active_admin=ACTIVE_ADMINISTRATOR),
-                (user_id, user_id)
-            ).rowcount
+                changed = self.conn.execute(
+                    'UPDATE users SET {} = 1{} WHERE id = ?'.format(
+                        column, also), (user_id,)
+                ).rowcount
+            else:
+                changed = self.conn.execute(
+                    'UPDATE users SET {column} = 0{also} WHERE id = ? AND '
+                    '(NOT {active_admin} OR EXISTS (SELECT 1 FROM users '
+                    'WHERE id != ? AND {active_admin}))'.format(
+                        column=column, also=also,
+                        active_admin=ACTIVE_ADMINISTRATOR),
+                    (user_id, user_id)
+                ).rowcount
         if not changed:
+            if not self.find_by_id(user_id):
+                raise UserGone(user_id)
             raise LastAdministrator()
 
     def set_active(self, user_id, active):
-        self._set_flag('active', user_id, active)
+        # deactivation ends the sessions too, so that reactivating does not
+        # bring old cookies back
+        also = '' if active else ', session_version = session_version + 1'
+        self._set_flag('active', user_id, active, also)
 
     def set_administrator(self, user_id, is_administrator):
         self._set_flag('is_admin', user_id, is_administrator)
@@ -266,9 +280,13 @@ class UserStore(object):
                 'No users in {!r} and WSSH_INIT_USER/WSSH_INIT_PASSWORD '
                 'not set'.format(self.path)
             )
-        if len(password.encode()) > MAX_PASSWORD_BYTES:
-            raise ConfigError('WSSH_INIT_PASSWORD must be at most {} bytes'
-                              .format(MAX_PASSWORD_BYTES))
+        # the same rules as for users created on the users page
+        error = username_error(username)
+        if error:
+            raise ConfigError('WSSH_INIT_USER: ' + error)
+        error = password_error(password, password)
+        if error:
+            raise ConfigError('WSSH_INIT_PASSWORD: ' + error)
         self.create(username, hash_password(password), is_administrator=True)
         logging.info('Created administrator {!r}'.format(username))
 
@@ -331,7 +349,9 @@ class Session(object):
     def from_json(cls, value):
         try:
             data = json.loads(value)
-            session = cls(data['user_id'], int(data['version']),
+            # cookies from before session_version existed carry none;
+            # every user started at 0
+            session = cls(data['user_id'], int(data.get('version', 0)),
                           float(data['last_activity']))
         except (ValueError, TypeError, KeyError):
             return None

@@ -1,10 +1,13 @@
+import json
 import re
 import sqlite3
+import time
 
 import tornado.gen
 
 from tornado.options import options
 from tornado.testing import AsyncHTTPTestCase
+from tornado.web import create_signed_value
 from tests.test_auth import SignInTestBase, urlencode
 from webssh.main import make_app, make_handlers
 from webssh.settings import get_app_settings
@@ -167,7 +170,9 @@ class TestEditUser(AdminTestBase):
         self.assertIn(b'Smith Robert', self.request('/').body)
 
     def test_unknown_user_is_404(self):
-        self.assertEqual(self.request('/admin/users/999').code, 404)
+        for user_id in ('999', '9' * 30):
+            self.assertEqual(
+                self.request('/admin/users/' + user_id).code, 404, user_id)
 
 
 class TestSetPassword(AdminTestBase):
@@ -229,6 +234,11 @@ class TestDeactivateAndAdministration(AdminTestBase):
         self.jar = {'_xsrf': 'yummy'}
         self.assertIn(b'Invalid username or password',
                       self.sign_in(username='bob', password='password1').body)
+
+    def test_reactivation_does_not_bring_back_old_sessions(self):
+        self.act('bob', 'deactivate')
+        self.act('bob', 'activate')
+        self.assertEqual(self.as_bob().code, 303)
 
     def test_reactivated_user_can_sign_in_again(self):
         self.act('bob', 'deactivate')
@@ -315,6 +325,18 @@ class TestProfile(AdminTestBase):
         self.assertEqual(self.in_other_browser().code, 303)
         self.sign_in_as('bob', 'new password')
 
+    def test_profile_says_open_terminals_stay_open(self):
+        self.assertIn(b'Terminals that are already open stay connected',
+                      self.request('/account').body)
+
+    def test_guessing_the_current_password_is_limited(self):
+        for _ in range(5):
+            response = self.change_password(current='wrong')
+            self.assertIn(b'Current password is wrong', response.body)
+        response = self.change_password()
+        self.assertIn(b'Too many attempts, try later', response.body)
+        self.assertEqual(self.in_other_browser().code, 200)
+
     def test_sign_out_everywhere_ends_all_sessions(self):
         response = self.request('/account', 'POST', dict(
             action='signout_everywhere', _xsrf='yummy'))
@@ -400,3 +422,20 @@ class TestNoAdministrationWithoutSignIn(AsyncHTTPTestCase):
     def test_admin_and_account_pages_do_not_exist(self):
         for url in ('/admin/users', '/admin/users/1', '/account'):
             self.assertEqual(self.fetch(url).code, 404, url)
+
+
+class TestSessionsFromBeforeAdministration(AdminTestBase):
+
+    def cookie(self, value):
+        return create_signed_value(self.cookiesecret, 'wssh_session',
+                                   value).decode()
+
+    def test_cookie_without_session_version_still_works(self):
+        self.jar['wssh_session'] = self.cookie(json.dumps(
+            dict(user_id=1, last_activity=time.time())))
+        self.assertEqual(self.request('/').code, 200)
+
+    def test_unreadable_cookie_is_cleared(self):
+        self.jar['wssh_session'] = self.cookie('not json')
+        self.assertEqual(self.request('/').code, 303)
+        self.assertNotIn('wssh_session', self.jar)

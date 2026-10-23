@@ -26,7 +26,7 @@
   <input type="hidden" name="action" value="password">
   {% module xsrf_form_html() %}
   <button type="submit" class="btn btn-primary">Change password</button>
-  <small class="form-text text-muted">You stay signed in here; your other sessions end.</small>
+  <small class="form-text text-muted">You stay signed in here; your other sessions end. Terminals that are already open stay connected.</small>
 </form>
 
 <h5 style="margin-top: 20px;">Sessions</h5>
@@ -34,6 +34,6 @@
   <input type="hidden" name="action" value="signout_everywhere">
   {% module xsrf_form_html() %}
   <button type="submit" class="btn btn-danger">Sign out everywhere</button>
-  <small class="form-text text-muted">Ends all your sessions, including this one.</small>
+  <small class="form-text text-muted">Ends all your sessions, including this one. Terminals that are already open stay connected until you close their tabs.</small>
 </form>
 {% end %}

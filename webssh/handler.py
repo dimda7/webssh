@@ -320,6 +320,8 @@ class SessionMixin(object):
         value = self.get_signed_cookie(self.session_cookie)
         session = Session.from_json(value) if value else None
         if not session:
+            if value:
+                self.clear_cookie(self.session_cookie)
             return None
 
         user = self.settings['user_store'].find_by_id(session.user_id)

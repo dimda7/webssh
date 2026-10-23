@@ -46,7 +46,7 @@
   <input type="hidden" name="action" value="password">
   {% module xsrf_form_html() %}
   <button type="submit" class="btn btn-primary">Set password</button>
-  <small class="form-text text-muted">The user will be signed out everywhere.</small>
+  <small class="form-text text-muted">The user will be signed out everywhere; terminals that are already open stay connected.</small>
 </form>
 {% end %}
 

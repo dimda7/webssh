@@ -5,7 +5,7 @@ import tornado.web
 
 from webssh.handler import MixinHandler, SignInRequiredMixin
 from webssh.signin import (
-    LastAdministrator, Names, Session, UsernameTaken,
+    LastAdministrator, Names, Session, UserGone, UsernameTaken,
     check_password_off_loop, hash_password_off_loop, password_error,
     username_error
 )
@@ -103,7 +103,10 @@ class UserHandler(AdministratorRequiredMixin, MixinHandler,
     """One User's page and the actions on that User."""
 
     def find_user(self, user_id):
-        user = self.settings['user_store'].find_by_id(int(user_id))
+        user_id = int(user_id)
+        # SQLite integers are 64-bit; a longer id can not exist
+        user = self.settings['user_store'].find_by_id(user_id) \
+            if user_id < 2 ** 63 else None
         if not user:
             raise tornado.web.HTTPError(404)
         return user
@@ -119,7 +122,10 @@ class UserHandler(AdministratorRequiredMixin, MixinHandler,
     @tornado.gen.coroutine
     def post(self, user_id):
         user = self.find_user(user_id)
-        error = yield self.run_action(user)
+        try:
+            error = yield self.run_action(user)
+        except UserGone:
+            raise tornado.web.HTTPError(404)
         if error:
             self.render_page(user, error)
             return
@@ -195,10 +201,18 @@ class ProfileHandler(FormMixin, MixinHandler, tornado.web.RequestHandler):
     def change_password(self):
         user = self.signed_in_user
         store = self.settings['user_store']
+        # the current password can be guessed here as on the sign-in page,
+        # so it counts against the same limit
+        ip = self.get_client_addr()[0]
+        limiter = self.settings['signin_limiter']
+        if limiter.is_blocked(ip):
+            return 'Too many attempts, try later'
+        limiter.add_attempt(ip, user.username)
         matched = yield check_password_off_loop(
             user, self.get_raw_argument('current'))
         if not matched:
             return 'Current password is wrong'
+        limiter.forget(ip, user.username)
         password, error = self.read_new_password()
         if error:
             return error
