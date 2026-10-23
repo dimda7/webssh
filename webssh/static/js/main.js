@@ -394,6 +394,13 @@ jQuery(function($){
     var key = pending_key;
     pending_key = undefined;
 
+    if (resp.status === 401 && resp.responseJSON &&
+        resp.responseJSON.signin_required) {
+      // the sign-in session is over
+      window.location = resp.responseJSON.location;
+      return;
+    }
+
     if (resp.status !== 200) {
       log_status(resp.status + ': ' + resp.statusText, true);
       state = DISCONNECTED;

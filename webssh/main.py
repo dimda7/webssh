@@ -1,10 +1,15 @@
 import logging
+import sys
 import tornado.web
 import tornado.ioloop
 
 from tornado.options import options
 from webssh import handler
-from webssh.handler import IndexHandler, WsockHandler, NotFoundHandler
+from webssh.handler import (
+    IndexHandler, WsockHandler, NotFoundHandler, SignInHandler,
+    SignOutHandler, SIGNIN_URL, SIGNOUT_URL
+)
+from webssh.signin import ConfigError
 from webssh.settings import (
     get_app_settings,  get_host_keys_settings, get_policy_setting,
     get_ssl_context, get_server_settings, check_encoding_setting
@@ -20,6 +25,11 @@ def make_handlers(loop, options):
                                   host_keys_settings=host_keys_settings)),
         (r'/ws', WsockHandler, dict(loop=loop))
     ]
+    if options.authdb:
+        handlers += [
+            (SIGNIN_URL, SignInHandler),
+            (SIGNOUT_URL, SignOutHandler)
+        ]
     return handlers
 
 
@@ -44,7 +54,13 @@ def main():
     options.parse_command_line()
     check_encoding_setting(options.encoding)
     loop = tornado.ioloop.IOLoop.current()
-    app = make_app(make_handlers(loop, options), get_app_settings(options))
+    try:
+        app = make_app(make_handlers(loop, options),
+                       get_app_settings(options))
+    except ConfigError as exc:
+        # a misconfiguration, not a bug: no traceback for the operator
+        logging.error(exc)
+        sys.exit(1)
     ssl_ctx = get_ssl_context(options)
     server_settings = get_server_settings(options)
     app_listen(app, options.port, options.address, server_settings)

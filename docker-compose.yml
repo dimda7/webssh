@@ -2,9 +2,12 @@ version: '3'
 services:
   web:
     build: .
-    command: ["python", "run.py", "--certfile=/certs/webssh.crt", "--keyfile=/certs/webssh.key", "--sslport=4433"]
+    command: ["python", "run.py", "--certfile=/certs/webssh.crt", "--keyfile=/certs/webssh.key", "--sslport=4433", "--authdb=/data/users.db", "--xheaders=False"]
+    env_file: .env
     volumes:
     - ./certs:/certs:ro
+    - webssh-data:/data
     ports:
-    - "8888:8888"
     - "4433:4433"
+volumes:
+  webssh-data:
