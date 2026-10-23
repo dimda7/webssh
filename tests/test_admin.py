@@ -240,6 +240,11 @@ class TestDeactivateAndAdministration(AdminTestBase):
         self.act('bob', 'activate')
         self.assertEqual(self.as_bob().code, 303)
 
+    def test_deactivate_says_open_terminals_stay_open(self):
+        body = self.request(self.user_url('bob')).body
+        self.assertIn(b'Terminals that are already open stay connected',
+                      body[body.index(b'value="deactivate"'):])
+
     def test_reactivated_user_can_sign_in_again(self):
         self.act('bob', 'deactivate')
         self.act('bob', 'activate')
@@ -336,6 +341,33 @@ class TestProfile(AdminTestBase):
         response = self.change_password()
         self.assertIn(b'Too many attempts, try later', response.body)
         self.assertEqual(self.in_other_browser().code, 200)
+
+    def test_failed_sign_ins_from_the_same_ip_do_not_block_the_profile(self):
+        jar = self.jar
+        self.jar = {'_xsrf': 'yummy'}
+        for _ in range(5):
+            self.sign_in(username='nobody', password='wrong')
+        self.jar = jar
+        self.assertEqual(self.change_password().code, 303)
+
+    def test_failed_current_passwords_do_not_block_sign_in(self):
+        for _ in range(5):
+            self.change_password(current='wrong')
+        self.sign_in_as(self.init_user, self.init_password)
+
+    def test_request_with_the_old_cookie_does_not_clear_the_new_one(self):
+        old_cookie = self.jar['wssh_session']
+        self.change_password()
+        new_cookie = self.jar['wssh_session']
+
+        response = self.fetch('/', headers={
+            'Cookie': '_xsrf=yummy; wssh_session=' + old_cookie},
+            follow_redirects=False)
+        self.assertEqual(response.code, 303)
+        self.assertFalse([c for c in response.headers.get_list('Set-Cookie')
+                          if c.startswith('wssh_session=')])
+        self.assertEqual(self.jar['wssh_session'], new_cookie)
+        self.assertEqual(self.request('/').code, 200)
 
     def test_sign_out_everywhere_ends_all_sessions(self):
         response = self.request('/account', 'POST', dict(

@@ -12,7 +12,9 @@ from concurrent.futures import ThreadPoolExecutor
 from tornado.ioloop import IOLoop
 from tornado.options import options
 from tornado.process import cpu_count
-from webssh.signin import Session, check_password_off_loop, safe_next_url
+from webssh.signin import (
+    Session, TooManyAttempts, check_password_limited, safe_next_url
+)
 from webssh.urls import PROFILE_URL, SIGNIN_URL, SIGNOUT_URL, USERS_URL
 from webssh.utils import (
     is_valid_ip_address, is_valid_port, is_valid_hostname, to_bytes, to_str,
@@ -325,7 +327,11 @@ class SessionMixin(object):
             return None
 
         user = self.settings['user_store'].find_by_id(session.user_id)
-        if not user or not user.active or not session.belongs_to(user) or \
+        if user and user.active and not session.belongs_to(user):
+            # not cleared: a request still in flight with the old cookie
+            # must not wipe the one just issued, e.g. by a password change
+            return None
+        if not user or not user.active or \
                 session.is_expired(self.settings['signin_timeout']):
             self.clear_cookie(self.session_cookie)
             return None
@@ -419,27 +425,21 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
     @tornado.gen.coroutine
     def post(self):
-        ip = self.get_client_addr()[0]
-        limiter = self.settings['signin_limiter']
-        if limiter.is_blocked(ip):
-            self.render('signin.html', error=self.blocked_message)
-            return
-
         username = self.get_argument('username', u'')
-        # counted before bcrypt runs, so concurrent attempts can not slip
-        # past the limit while earlier ones are still being checked
-        limiter.add_attempt(ip, username)
-
         # the sqlite3 connection belongs to the IOLoop thread, bcrypt does not
         user = self.settings['user_store'].find(username)
-        matched = yield check_password_off_loop(
-            user, self.get_raw_argument('password')
-        )
+        try:
+            matched = yield check_password_limited(
+                self.settings['signin_limiter'], self.get_client_addr()[0],
+                username, user, self.get_raw_argument('password')
+            )
+        except TooManyAttempts:
+            self.render('signin.html', error=self.blocked_message)
+            return
         if not matched:
             self.render('signin.html', error=self.error_message)
             return
 
-        limiter.forget(ip, username)
         self.save_session(Session.for_user(user))
         self.redirect(self.next_url(), status=303)
 

@@ -5,9 +5,9 @@ import tornado.web
 
 from webssh.handler import MixinHandler, SignInRequiredMixin
 from webssh.signin import (
-    LastAdministrator, Names, Session, UserGone, UsernameTaken,
-    check_password_off_loop, hash_password_off_loop, password_error,
-    username_error
+    LastAdministrator, Names, Session, TooManyAttempts, UserGone,
+    UsernameTaken, check_password_limited, hash_password_off_loop,
+    password_error, username_error
 )
 from webssh.urls import PROFILE_URL, SIGNIN_URL, USERS_URL
 
@@ -103,10 +103,7 @@ class UserHandler(AdministratorRequiredMixin, MixinHandler,
     """One User's page and the actions on that User."""
 
     def find_user(self, user_id):
-        user_id = int(user_id)
-        # SQLite integers are 64-bit; a longer id can not exist
-        user = self.settings['user_store'].find_by_id(user_id) \
-            if user_id < 2 ** 63 else None
+        user = self.settings['user_store'].find_by_id(int(user_id))
         if not user:
             raise tornado.web.HTTPError(404)
         return user
@@ -201,24 +198,29 @@ class ProfileHandler(FormMixin, MixinHandler, tornado.web.RequestHandler):
     def change_password(self):
         user = self.signed_in_user
         store = self.settings['user_store']
-        # the current password can be guessed here as on the sign-in page,
-        # so it counts against the same limit
-        ip = self.get_client_addr()[0]
-        limiter = self.settings['signin_limiter']
-        if limiter.is_blocked(ip):
+        # whoever guesses here is already signed in as this User, so the
+        # attempts count per User, apart from sign-in's per-IP count
+        try:
+            matched = yield check_password_limited(
+                self.settings['profile_limiter'], user.id, user.username,
+                user, self.get_raw_argument('current')
+            )
+        except TooManyAttempts:
             return 'Too many attempts, try later'
-        limiter.add_attempt(ip, user.username)
-        matched = yield check_password_off_loop(
-            user, self.get_raw_argument('current'))
         if not matched:
             return 'Current password is wrong'
-        limiter.forget(ip, user.username)
         password, error = self.read_new_password()
         if error:
             return error
 
         password_hash = yield hash_password_off_loop(password)
-        store.set_password(user.id, password_hash)
+        try:
+            store.set_password(user.id, password_hash)
+        except UserGone:
+            # removed from the DB while bcrypt ran
+            self.clear_cookie(self.session_cookie)
+            self.redirect(SIGNIN_URL, status=303)
+            return
         # the other sessions end, this browser stays signed in
         self.save_session(Session.for_user(store.find_by_id(user.id)))
         logging.info('User {!r} changed their password'.format(

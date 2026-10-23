@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import bcrypt
 
+import tornado.gen
+
 from tornado.process import cpu_count
 
 
@@ -90,6 +92,10 @@ class LastAdministrator(Exception):
 
 class UserGone(Exception):
     """The User was removed from the DB, by hand or by another writer."""
+
+
+class TooManyAttempts(Exception):
+    """Too many recent password attempts under the same limiter key."""
 
 
 def hash_password(password):
@@ -177,21 +183,21 @@ class UserStore(object):
             (username,)
         ).fetchone() is not None
 
-    def update_names(self, user_id, names):
+    def _update(self, user_id, sql, params=()):
         with self.conn:
-            self.conn.execute(
-                'UPDATE users SET firstname = ?, lastname = ?, '
-                'middlename = ? WHERE id = ?', names.values() + (user_id,)
-            )
+            changed = self.conn.execute(sql, params + (user_id,)).rowcount
+        if not changed:
+            raise UserGone(user_id)
+
+    def update_names(self, user_id, names):
+        self._update(user_id, 'UPDATE users SET firstname = ?, lastname = ?, '
+                     'middlename = ? WHERE id = ?', names.values())
 
     def set_password(self, user_id, password_hash):
         """Also ends every session of the user (ADR 0002)."""
-        with self.conn:
-            self.conn.execute(
-                'UPDATE users SET password = ?, '
-                'session_version = session_version + 1 WHERE id = ?',
-                (password_hash, user_id)
-            )
+        self._update(user_id, 'UPDATE users SET password = ?, '
+                     'session_version = session_version + 1 WHERE id = ?',
+                     (password_hash,))
 
     def end_sessions(self, user_id):
         with self.conn:
@@ -328,6 +334,23 @@ def check_password_off_loop(user, password):
     return password_executor.submit(check_password, user, password)
 
 
+@tornado.gen.coroutine
+def check_password_limited(limiter, key, username, user, password):
+    """check_password_off_loop() counted against the limiter under key.
+
+    Raises TooManyAttempts when the key is over the limit.
+    """
+    if limiter.is_blocked(key):
+        raise TooManyAttempts()
+    # counted before bcrypt runs, so concurrent attempts can not slip past
+    # the limit while earlier ones are still being checked
+    limiter.add_attempt(key, username)
+    matched = yield check_password_off_loop(user, password)
+    if matched:
+        limiter.forget(key, username)
+    return matched
+
+
 class Session(object):
     """What the signed session cookie holds about the signed-in user.
 
@@ -372,10 +395,12 @@ class Session(object):
 
 
 class SignInLimiter(object):
-    """Counts sign-in attempts per client IP within a sliding window.
+    """Counts password attempts per key within a sliding window.
 
-    An attempt counts from the moment it starts; a successful one is
-    forgotten, together with earlier failures for the same username only.
+    The key is the client IP for sign-in, and the User for checking the
+    current password in My profile. An attempt counts from the moment it
+    starts; a successful one is forgotten, together with earlier failures
+    for the same username only.
     """
 
     limit = 5

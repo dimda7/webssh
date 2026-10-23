@@ -32,7 +32,8 @@ def make_handlers(loop, options):
             (SIGNIN_URL, SignInHandler),
             (SIGNOUT_URL, SignOutHandler),
             (USERS_URL, UsersHandler),
-            (USERS_URL + r'/(\d+)', UserHandler),
+            # SQLite ids fit in 63 bits, so 18 digits always do
+            (USERS_URL + r'/(\d{1,18})', UserHandler),
             (PROFILE_URL, ProfileHandler)
         ]
     return handlers

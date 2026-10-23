@@ -59,6 +59,7 @@
   {% module xsrf_form_html() %}
   {% if user.active %}
   <button type="submit" class="btn btn-danger" name="action" value="deactivate">Deactivate</button>
+  <small class="form-text text-muted">Signs the user out everywhere and refuses sign-in. Terminals that are already open stay connected.</small>
   {% else %}
   <button type="submit" class="btn btn-primary" name="action" value="activate">Reactivate</button>
   {% end %}
