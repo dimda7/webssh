@@ -1,7 +1,11 @@
 WebSSH
 ------
 
-|Build Status| |codecov| |PyPI - Python Version| |PyPI|
+|PyPI - Python Version|
+
+    Fork of `huashengdun/webssh <https://github.com/huashengdun/webssh>`_
+    with a few client-side additions and a ready-to-use HTTPS setup for
+    Docker. See `Fork changes`_.
 
 Introduction
 ~~~~~~~~~~~~
@@ -23,6 +27,22 @@ Features
 -  Auto detect the ssh server's default encoding.
 -  Modern browsers including Chrome, Firefox, Safari, Edge, Opera
    supported.
+
+Fork changes
+~~~~~~~~~~~~
+
+-  **Remembered private key.** After a successful login the private key
+   file (and its passphrase, if any) is saved in the browser's
+   ``localStorage`` and restored into the form on the next visit.
+   Resetting the form forgets it. Only use this on a device you trust.
+-  **Copy on select.** Selecting text in the terminal copies it to the
+   clipboard.
+-  **OSC 52 clipboard.** Remote programs (tmux, vim, etc.) can set the
+   browser clipboard through the OSC 52 escape sequence. Reading the
+   clipboard from the server is not allowed.
+-  **HTTPS in Docker.** ``docker-compose.yml`` serves HTTPS on port
+   ``4433`` using certificates from the local ``certs/`` directory (see
+   `Use Docker`_).
 
 Preview
 ~~~~~~~
@@ -46,7 +66,10 @@ Requirements
 Quickstart
 ~~~~~~~~~~
 
-1. Install this app, run command ``pip install webssh``
+1. Install this app, run command
+   ``pip install git+https://github.com/dimda7/webssh.git``
+   (``pip install webssh`` installs the upstream version without the
+   fork changes)
 2. Start a webserver, run command ``wssh``
 3. Open your browser, navigate to ``127.0.0.1:8888``
 4. Input your data, submit the form.
@@ -158,7 +181,17 @@ Passing a terminal type
 Use Docker
 ~~~~~~~~~~
 
-Start up the app
+The compose file expects a certificate and key in ``certs/`` (the
+directory is ignored by git and docker). For a self-signed one:
+
+::
+
+    mkdir -p certs
+    openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+      -keyout certs/webssh.key -out certs/webssh.crt -subj "/CN=localhost"
+
+Start up the app, then open ``https://localhost:4433`` (plain http stays
+on port ``8888``)
 
 ::
 
@@ -235,12 +268,7 @@ Tips
    file("./known\_hosts") in order, if the ssh server's hostname is not
    found or the key is not matched, the connection will be aborted.
 
-.. |Build Status| image:: https://travis-ci.org/huashengdun/webssh.svg?branch=master
-   :target: https://travis-ci.org/huashengdun/webssh
-.. |codecov| image:: https://codecov.io/gh/huashengdun/webssh/branch/master/graph/badge.svg
-   :target: https://codecov.io/gh/huashengdun/webssh
 .. |PyPI - Python Version| image:: https://img.shields.io/pypi/pyversions/webssh.svg
-.. |PyPI| image:: https://img.shields.io/pypi/v/webssh.svg
-.. |Login| image:: https://github.com/huashengdun/webssh/raw/master/preview/login.png
-.. |Terminal| image:: https://github.com/huashengdun/webssh/raw/master/preview/terminal.png
+.. |Login| image:: https://github.com/dimda7/webssh/raw/master/preview/login.png
+.. |Terminal| image:: https://github.com/dimda7/webssh/raw/master/preview/terminal.png
 
