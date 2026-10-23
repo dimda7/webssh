@@ -11,7 +11,9 @@ RUN \
   apk del gcc libc-dev libffi-dev && \
   addgroup webssh && \
   adduser -Ss /bin/false -g webssh webssh && \
-  chown -R webssh:webssh /code
+  chown -R webssh:webssh /code && \
+  mkdir /data && \
+  chown webssh:webssh /data
 
 EXPOSE 8888/tcp
 USER webssh

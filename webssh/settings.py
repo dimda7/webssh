@@ -1,9 +1,11 @@
 import logging
+import os
 import os.path
 import ssl
 import sys
 
 from tornado.options import define
+from webssh.auth import SignInLimiter, UserStore
 from webssh.policy import (
     load_host_keys, get_policy_class, check_policy_setting
 )
@@ -51,6 +53,13 @@ define('font', default='', help='custom font filename')
 define('encoding', default='',
        help='''The default character encoding of ssh servers.
 Example: --encoding='utf-8' to solve the problem with some switches&routers''')
+define('authdb', default='',
+       help='SQLite file with webssh users, enables sign-in when set')
+define('cookiesecret', default='',
+       help='Hex secret signing the session cookie, 32 bytes. '
+       'Falls back to the WSSH_COOKIE_SECRET environment variable')
+define('authtimeout', type=float, default=3600.0,
+       help='Seconds of inactivity after which a user must sign in again')
 define('version', type=bool, help='Show version information',
        callback=print_version)
 
@@ -87,7 +96,38 @@ def get_app_settings(options):
         ),
         origin_policy=get_origin_setting(options)
     )
+    if options.authdb:
+        settings.update(get_auth_settings(options))
     return settings
+
+
+def get_cookie_secret(options):
+    secret = options.cookiesecret or os.environ.get('WSSH_COOKIE_SECRET', '')
+    if not secret:
+        raise ValueError(
+            'Sign-in needs --cookiesecret or WSSH_COOKIE_SECRET'
+        )
+    try:
+        size = len(bytes.fromhex(secret))
+    except ValueError:
+        size = None
+    if size != 32:
+        raise ValueError('Cookie secret must be 32 bytes in hex')
+    return secret
+
+
+def get_auth_settings(options):
+    cookie_secret = get_cookie_secret(options)
+    user_store = UserStore(options.authdb)
+    user_store.bootstrap(os.environ.get('WSSH_INIT_USER', ''),
+                         os.environ.get('WSSH_INIT_PASSWORD', ''))
+    return dict(
+        auth_enabled=True,
+        cookie_secret=cookie_secret,
+        user_store=user_store,
+        signin_limiter=SignInLimiter(),
+        auth_timeout=options.authtimeout
+    )
 
 
 def get_server_settings(options):

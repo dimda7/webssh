@@ -66,3 +66,6 @@ known_hosts
 
 # Local TLS certificates
 certs/
+
+# Local secrets for docker-compose
+.env

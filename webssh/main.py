@@ -4,7 +4,10 @@ import tornado.ioloop
 
 from tornado.options import options
 from webssh import handler
-from webssh.handler import IndexHandler, WsockHandler, NotFoundHandler
+from webssh.handler import (
+    IndexHandler, WsockHandler, NotFoundHandler, SignInHandler,
+    SignOutHandler
+)
 from webssh.settings import (
     get_app_settings,  get_host_keys_settings, get_policy_setting,
     get_ssl_context, get_server_settings, check_encoding_setting
@@ -20,6 +23,11 @@ def make_handlers(loop, options):
                                   host_keys_settings=host_keys_settings)),
         (r'/ws', WsockHandler, dict(loop=loop))
     ]
+    if options.authdb:
+        handlers += [
+            (r'/auth/signin', SignInHandler),
+            (r'/auth/signout', SignOutHandler)
+        ]
     return handlers
 
 

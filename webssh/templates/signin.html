@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title> WebSSH - Sign in </title>
+    <link href="/static/img/favicon.png" rel="icon" type="image/png">
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet" type="text/css"/>
+    <style>
+      .container {
+        margin-top: 20px;
+        max-width: 400px;
+      }
+
+      .btn {
+        margin-top: 15px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h4>Sign in to WebSSH</h4>
+      <form id="signin" action="/auth/signin" method="post">
+        <label for="username">Username</label>
+        <input class="form-control" type="text" id="username" name="username" value="" required autofocus>
+        <label for="password">Password</label>
+        <input class="form-control" type="password" id="password" name="password" value="" required>
+        {% module xsrf_form_html() %}
+        <button type="submit" class="btn btn-primary">Sign in</button>
+      </form>
+      {% if error %}
+      <div id="status" style="color: red; margin-top: 15px;">{{ error }}</div>
+      {% end %}
+    </div>
+  </body>
+</html>
