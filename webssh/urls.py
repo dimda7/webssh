@@ -1,0 +1,4 @@
+SIGNIN_URL = '/auth/signin'
+SIGNOUT_URL = '/auth/signout'
+USERS_URL = '/admin/users'
+PROFILE_URL = '/account'

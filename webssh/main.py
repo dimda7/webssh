@@ -7,8 +7,10 @@ from tornado.options import options
 from webssh import handler
 from webssh.handler import (
     IndexHandler, WsockHandler, NotFoundHandler, SignInHandler,
-    SignOutHandler, SIGNIN_URL, SIGNOUT_URL
+    SignOutHandler
 )
+from webssh.administration import ProfileHandler, UserHandler, UsersHandler
+from webssh.urls import PROFILE_URL, SIGNIN_URL, SIGNOUT_URL, USERS_URL
 from webssh.signin import ConfigError
 from webssh.settings import (
     get_app_settings,  get_host_keys_settings, get_policy_setting,
@@ -28,7 +30,11 @@ def make_handlers(loop, options):
     if options.authdb:
         handlers += [
             (SIGNIN_URL, SignInHandler),
-            (SIGNOUT_URL, SignOutHandler)
+            (SIGNOUT_URL, SignOutHandler),
+            (USERS_URL, UsersHandler),
+            # SQLite ids fit in 63 bits, so 18 digits always do
+            (USERS_URL + r'/(\d{1,18})', UserHandler),
+            (PROFILE_URL, ProfileHandler)
         ]
     return handlers
 

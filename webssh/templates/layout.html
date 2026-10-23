@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title> WebSSH - {% block title %}{% end %} </title>
+    <link href="/static/img/favicon.png" rel="icon" type="image/png">
+    <link href="/static/css/bootstrap.min.css" rel="stylesheet" type="text/css"/>
+    <style>
+      .container {
+        margin-top: 20px;
+      }
+
+      .row {
+        margin-top: 10px;
+      }
+
+      .btn {
+        margin-top: 15px;
+      }
+
+      td .btn {
+        margin-top: 0;
+      }
+      {% include nav-style.html %}
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      {% include nav.html %}
+      {% block content %}{% end %}
+    </div>
+  </body>
+</html>

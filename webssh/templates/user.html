@@ -1,0 +1,72 @@
+{% extends layout.html %}
+{% block title %}{{ user.username }}{% end %}
+{% block content %}
+<a href="{{ users_url }}">&larr; Users</a>
+<h4>{{ user.username }}</h4>
+{% if error %}
+<div id="status" style="color: red;">{{ error }}</div>
+{% end %}
+
+<h5>Name</h5>
+<form id="names" action="{{ page_url }}" method="post">
+  <div class="row">
+    <div class="col">
+      <label for="lastname">Last name</label>
+      <input class="form-control" type="text" id="lastname" name="lastname" value="{{ user.names.lastname or '' }}">
+    </div>
+    <div class="col">
+      <label for="firstname">First name</label>
+      <input class="form-control" type="text" id="firstname" name="firstname" value="{{ user.names.firstname or '' }}">
+    </div>
+    <div class="col">
+      <label for="middlename">Middle name</label>
+      <input class="form-control" type="text" id="middlename" name="middlename" value="{{ user.names.middlename or '' }}">
+    </div>
+  </div>
+  <input type="hidden" name="action" value="names">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-primary">Save name</button>
+</form>
+
+<h5 style="margin-top: 20px;">Password</h5>
+{% if is_self %}
+<p>Change your own password in <a href="{{ profile_url }}">My profile</a>.</p>
+{% else %}
+<form id="password" action="{{ page_url }}" method="post">
+  <div class="row">
+    <div class="col">
+      <label for="new-password">New password</label>
+      <input class="form-control" type="password" id="new-password" name="password" required>
+    </div>
+    <div class="col">
+      <label for="new-password2">Repeat password</label>
+      <input class="form-control" type="password" id="new-password2" name="password2" required>
+    </div>
+  </div>
+  <input type="hidden" name="action" value="password">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-primary">Set password</button>
+  <small class="form-text text-muted">The user will be signed out everywhere; terminals that are already open stay connected.</small>
+</form>
+{% end %}
+
+<h5 style="margin-top: 20px;">Access</h5>
+<p>
+  {{ 'Active' if user.active else 'Deactivated' }},
+  {{ 'Administrator' if user.is_administrator else 'not an Administrator' }}.
+</p>
+<form id="access" action="{{ page_url }}" method="post">
+  {% module xsrf_form_html() %}
+  {% if user.active %}
+  <button type="submit" class="btn btn-danger" name="action" value="deactivate">Deactivate</button>
+  <small class="form-text text-muted">Signs the user out everywhere and refuses sign-in. Terminals that are already open stay connected.</small>
+  {% else %}
+  <button type="submit" class="btn btn-primary" name="action" value="activate">Reactivate</button>
+  {% end %}
+  {% if user.is_administrator %}
+  <button type="submit" class="btn btn-secondary" name="action" value="revoke">Revoke administration</button>
+  {% else %}
+  <button type="submit" class="btn btn-secondary" name="action" value="grant">Make Administrator</button>
+  {% end %}
+</form>
+{% end %}

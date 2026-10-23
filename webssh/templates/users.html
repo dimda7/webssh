@@ -1,0 +1,61 @@
+{% extends layout.html %}
+{% block title %}Users{% end %}
+{% block content %}
+<h4>Users</h4>
+<table class="table table-sm" id="users">
+  <thead>
+    <tr><th>Username</th><th>Name</th><th>Active</th><th>Administrator</th></tr>
+  </thead>
+  <tbody>
+    {% for user in users %}
+    <tr>
+      <td><a href="{{ users_url }}/{{ user.id }}">{{ user.username }}</a></td>
+      <td>{{ user.fullname if user.fullname != user.username else '' }}</td>
+      <td>{{ 'yes' if user.active else 'no' }}</td>
+      <td>{{ 'yes' if user.is_administrator else 'no' }}</td>
+    </tr>
+    {% end %}
+  </tbody>
+</table>
+
+<h5>New user</h5>
+{% if error %}
+<div id="status" style="color: red;">{{ error }}</div>
+{% end %}
+<form id="create-user" action="{{ users_url }}" method="post">
+  <div class="row">
+    <div class="col">
+      <label for="username">Username</label>
+      <input class="form-control" type="text" id="username" name="username" value="{{ username }}" required>
+    </div>
+    <div class="col">
+      <label for="password">Password</label>
+      <input class="form-control" type="password" id="password" name="password" required>
+    </div>
+    <div class="col">
+      <label for="password2">Repeat password</label>
+      <input class="form-control" type="password" id="password2" name="password2" required>
+    </div>
+  </div>
+  <div class="row">
+    <div class="col">
+      <label for="lastname">Last name</label>
+      <input class="form-control" type="text" id="lastname" name="lastname" value="{{ names.lastname or '' }}">
+    </div>
+    <div class="col">
+      <label for="firstname">First name</label>
+      <input class="form-control" type="text" id="firstname" name="firstname" value="{{ names.firstname or '' }}">
+    </div>
+    <div class="col">
+      <label for="middlename">Middle name</label>
+      <input class="form-control" type="text" id="middlename" name="middlename" value="{{ names.middlename or '' }}">
+    </div>
+  </div>
+  <div class="form-check" style="margin-top: 10px;">
+    <input class="form-check-input" type="checkbox" id="is_administrator" name="is_administrator"{% if is_administrator %} checked{% end %}>
+    <label class="form-check-label" for="is_administrator">Administrator</label>
+  </div>
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-primary">Create user</button>
+</form>
+{% end %}

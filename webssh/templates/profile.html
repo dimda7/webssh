@@ -1,0 +1,39 @@
+{% extends layout.html %}
+{% block title %}My profile{% end %}
+{% block content %}
+<a href="/">&larr; Connect</a>
+<h4>{{ signed_in_user.username }}</h4>
+{% if error %}
+<div id="status" style="color: red;">{{ error }}</div>
+{% end %}
+
+<h5>Change password</h5>
+<form id="password" action="{{ profile_url }}" method="post">
+  <div class="row">
+    <div class="col">
+      <label for="current">Current password</label>
+      <input class="form-control" type="password" id="current" name="current" required>
+    </div>
+    <div class="col">
+      <label for="new-password">New password</label>
+      <input class="form-control" type="password" id="new-password" name="password" required>
+    </div>
+    <div class="col">
+      <label for="new-password2">Repeat password</label>
+      <input class="form-control" type="password" id="new-password2" name="password2" required>
+    </div>
+  </div>
+  <input type="hidden" name="action" value="password">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-primary">Change password</button>
+  <small class="form-text text-muted">You stay signed in here; your other sessions end. Terminals that are already open stay connected.</small>
+</form>
+
+<h5 style="margin-top: 20px;">Sessions</h5>
+<form id="signout-everywhere" action="{{ profile_url }}" method="post">
+  <input type="hidden" name="action" value="signout_everywhere">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-danger">Sign out everywhere</button>
+  <small class="form-text text-muted">Ends all your sessions, including this one. Terminals that are already open stay connected until you close their tabs.</small>
+</form>
+{% end %}

@@ -136,6 +136,7 @@ def get_signin_settings(options):
         cookie_secret=cookie_secret,
         user_store=user_store,
         signin_limiter=SignInLimiter(),
+        profile_limiter=SignInLimiter(),
         signin_timeout=options.authtimeout
     )
 

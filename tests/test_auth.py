@@ -42,6 +42,7 @@ class SignInTestBase(AsyncHTTPTestCase):
         self.tmpdir = tempfile.mkdtemp()
         self.authdb = os.path.join(self.tmpdir, 'users.db')
         self.jar = {'_xsrf': 'yummy'}
+        self.prepare_db()
 
         env = {}
         if self.init_user is not None:
@@ -64,6 +65,9 @@ class SignInTestBase(AsyncHTTPTestCase):
         options.authtimeout = self.authtimeout
         return make_app(make_handlers(self.io_loop, options),
                         get_app_settings(options))
+
+    def prepare_db(self):
+        """Arranges the DB before webssh starts on it."""
 
     def tearDown(self):
         super(SignInTestBase, self).tearDown()
@@ -433,6 +437,16 @@ class TestSignInStartup(unittest.TestCase):
         self.assert_refuses_to_start(
             dict(WSSH_INIT_USER='alice', WSSH_INIT_PASSWORD='x' * 73),
             '72 bytes'
+        )
+
+    def test_init_user_follows_the_same_rules_as_the_users_page(self):
+        self.assert_refuses_to_start(
+            dict(WSSH_INIT_USER='alice', WSSH_INIT_PASSWORD='short'),
+            'at least 8 characters'
+        )
+        self.assert_refuses_to_start(
+            dict(WSSH_INIT_USER='alice smith', WSSH_INIT_PASSWORD='password1'),
+            'Username must be'
         )
 
     def test_refuses_to_start_with_no_users_and_no_init_env(self):
