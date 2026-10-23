@@ -2,88 +2,88 @@
 
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/webssh.svg)
 
-> Fork of [huashengdun/webssh](https://github.com/huashengdun/webssh) with a few client-side additions and a ready-to-use HTTPS setup for Docker. See [Fork changes](#fork-changes).
+> Форк [huashengdun/webssh](https://github.com/huashengdun/webssh) с несколькими доработками клиента и готовой настройкой HTTPS для Docker. Подробнее — в разделе [Изменения форка](#изменения-форка).
 
 
-### Introduction
+### Введение
 
-A simple web application to be used as an ssh client to connect to your ssh servers. It is written in Python, base on tornado, paramiko and xterm.js.
+Простое веб-приложение — SSH-клиент для подключения к вашим SSH-серверам. Написано на Python с использованием tornado, paramiko и xterm.js.
 
-### Features
+### Возможности
 
-* SSH password authentication supported, including empty password.
-* SSH public-key authentication supported, including DSA RSA ECDSA Ed25519 keys.
-* Encrypted keys supported.
-* Two-Factor Authentication (time-based one-time password) supported.
-* Fullscreen terminal supported.
-* Terminal window resizable.
-* Auto detect the ssh server's default encoding.
-* Modern browsers including Chrome, Firefox, Safari, Edge, Opera supported.
-
-
-### Fork changes
-
-* **Remembered private key.** After a successful login the private key file (and its passphrase, if any) is saved in the browser's `localStorage` and restored into the form on the next visit. Resetting the form forgets it. Only use this on a device you trust.
-* **Copy on select.** Selecting text in the terminal copies it to the clipboard.
-* **OSC 52 clipboard.** Remote programs (tmux, vim, etc.) can set the browser clipboard through the OSC 52 escape sequence. Reading the clipboard from the server is not allowed.
-* **HTTPS in Docker.** `docker-compose.yml` serves HTTPS on port `4433` using certificates from the local `certs/` directory (see [Use Docker](#use-docker)).
+* Аутентификация по паролю, в том числе с пустым паролем.
+* Аутентификация по публичному ключу: поддерживаются ключи DSA, RSA, ECDSA и Ed25519.
+* Поддержка зашифрованных ключей.
+* Двухфакторная аутентификация (одноразовые пароли TOTP).
+* Полноэкранный режим терминала.
+* Изменяемый размер окна терминала.
+* Автоматическое определение кодировки SSH-сервера по умолчанию.
+* Поддержка современных браузеров: Chrome, Firefox, Safari, Edge, Opera.
 
 
-### Preview
+### Изменения форка
 
-![Login](preview/login.png)
-![Terminal](preview/terminal.png)
+* **Запоминание приватного ключа.** После успешного входа файл приватного ключа (и пароль к нему, если он есть) сохраняется в `localStorage` браузера и при следующем открытии подставляется в форму. Сброс формы удаляет сохранённый ключ. Используйте это только на доверенном устройстве.
+* **Копирование при выделении.** Выделенный в терминале текст сразу копируется в буфер обмена.
+* **Буфер обмена через OSC 52.** Удалённые программы (tmux, vim и т. п.) могут записывать в буфер обмена браузера с помощью escape-последовательности OSC 52. Читать буфер обмена со стороны сервера нельзя.
+* **HTTPS в Docker.** `docker-compose.yml` поднимает HTTPS на порту `4433` с сертификатами из локальной папки `certs/` (см. [Запуск в Docker](#запуск-в-docker)).
 
 
-### How it works
+### Скриншоты
+
+![Вход](preview/login.png)
+![Терминал](preview/terminal.png)
+
+
+### Как это работает
 ```
 +---------+     http     +--------+    ssh    +-----------+
 | browser | <==========> | webssh | <=======> | ssh server|
 +---------+   websocket  +--------+    ssh    +-----------+
 ```
 
-### Requirements
+### Требования
 
 * Python 3.10+
 
 
-### Quickstart
+### Быстрый старт
 
-1. Install this app, run command `pip install git+https://github.com/dimda7/webssh.git` (`pip install webssh` installs the upstream version without the fork changes)
-2. Start a webserver, run command `wssh`
-3. Open your browser, navigate to `127.0.0.1:8888`
-4. Input your data, submit the form.
+1. Установите приложение: `pip install git+https://github.com/dimda7/webssh.git` (`pip install webssh` установит оригинальную версию без изменений форка)
+2. Запустите веб-сервер командой `wssh`
+3. Откройте в браузере `127.0.0.1:8888`
+4. Заполните форму и нажмите «Connect».
 
 
-### Server options
+### Параметры сервера
 
 ```bash
-# start a http server with specified listen address and listen port
+# запустить http-сервер на заданном адресе и порту
 wssh --address='2.2.2.2' --port=8000
 
-# start a https server, certfile and keyfile must be passed
+# запустить https-сервер, certfile и keyfile обязательны
 wssh --certfile='/path/to/cert.crt' --keyfile='/path/to/cert.key'
 
-# missing host key policy
+# политика для неизвестных ключей хоста
 wssh --policy=reject
 
-# logging level
+# уровень логирования
 wssh --logging=debug
 
-# log to file
+# писать лог в файл
 wssh --log-file-prefix=main.log
 
-# more options
+# остальные параметры
 wssh --help
 ```
 
-### Browser console
+### Консоль браузера
 
 ```javascript
-// connect to your ssh server
+// подключиться к SSH-серверу
 wssh.connect(hostname, port, username, password, privatekey, passphrase, totp);
 
-// pass an object to wssh.connect
+// передать в wssh.connect объект
 var opts = {
   hostname: 'hostname',
   port: 'port',
@@ -95,112 +95,112 @@ var opts = {
 };
 wssh.connect(opts);
 
-// without an argument, wssh will use the form data to connect
+// без аргументов wssh подключится по данным из формы
 wssh.connect();
 
-// set a new encoding for client to use
+// задать клиенту новую кодировку
 wssh.set_encoding(encoding);
 
-// reset encoding to use the default one
+// вернуть кодировку по умолчанию
 wssh.reset_encoding();
 
-// send a command to the server
+// отправить команду на сервер
 wssh.send('ls -l');
 ```
 
-### Custom Font
+### Свой шрифт
 
-To use custom font, put your font file in the directory `webssh/static/css/fonts/` and restart the server.
+Чтобы использовать свой шрифт, положите файл шрифта в папку `webssh/static/css/fonts/` и перезапустите сервер.
 
-### URL Arguments
+### Параметры в URL
 
-Support passing arguments by url (query or fragment) like following examples:
+Параметры можно передавать через URL (в query или во fragment), например:
 
-Passing form data (password must be encoded in base64, privatekey not supported)
+Данные формы (пароль должен быть закодирован в base64, приватный ключ так передать нельзя)
 ```bash
 http://localhost:8888/?hostname=xx&username=yy&password=str_base64_encoded
 ```
 
-Passing a terminal background color
+Цвет фона терминала
 ```bash
 http://localhost:8888/#bgcolor=green
 ```
 
-Passing a terminal font color
+Цвет шрифта терминала
 ```bash
 http://localhost:8888/#fontcolor=red
 ```
 
-Passing a user defined title
+Свой заголовок страницы
 ```bash
 http://localhost:8888/?title=my-ssh-server
 ```
 
-Passing an encoding
+Кодировка
 ```bash
 http://localhost:8888/#encoding=gbk
 ```
 
-Passing a font size
+Размер шрифта
 ```bash
 http://localhost:8888/#fontsize=24
 ```
 
-Passing a command executed right after login
+Команда, которая выполнится сразу после входа
 ```bash
 http://localhost:8888/?command=pwd
 ```
 
-Passing a terminal type
+Тип терминала
 ```bash
 http://localhost:8888/?term=xterm-256color
 ```
 
-### Use Docker
+### Запуск в Docker
 
-The compose file expects a certificate and key in `certs/` (the directory is ignored by git and docker). For a self-signed one:
+Compose-файл ожидает сертификат и ключ в папке `certs/` (она исключена из git и из Docker-образа). Самоподписанный сертификат можно создать так:
 ```
 mkdir -p certs
 openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
   -keyout certs/webssh.key -out certs/webssh.crt -subj "/CN=localhost"
 ```
 
-Start up the app, then open `https://localhost:4433` (plain http stays on port `8888`)
+Запустите приложение и откройте `https://localhost:4433` (обычный http остаётся на порту `8888`)
 ```
 docker-compose up
 ```
 
-Tear down the app
+Остановить приложение
 ```
 docker-compose down
 ```
 
-### Tests
+### Тесты
 
-Requirements
+Зависимости
 ```
 pip install pytest pytest-cov codecov flake8 mock
 ```
 
-Use unittest to run all tests
+Запуск всех тестов через unittest
 ```
 python -m unittest discover tests
 ```
 
-Use pytest to run all tests
+Запуск всех тестов через pytest
 ```
 python -m pytest tests
 ```
 
-### Deployment
+### Развёртывание
 
-Running behind an Nginx server
+За сервером Nginx
 
 ```bash
 wssh --address='127.0.0.1' --port=8888 --policy=reject
 ```
 ```nginx
-# Nginx config example
+# пример конфигурации Nginx
 location / {
     proxy_pass http://127.0.0.1:8888;
     proxy_http_version 1.1;
@@ -213,14 +213,14 @@ location / {
 }
 ```
 
-Running as a standalone server
+Как самостоятельный сервер
 ```bash
 wssh --port=8080 --sslport=4433 --certfile='cert.crt' --keyfile='cert.key' --xheaders=False --policy=reject
 ```
 
 
-### Tips
+### Советы
 
-* For whatever deployment choice you choose, don't forget to enable SSL.
-* By default plain http requests from a public network will be either redirected or blocked and being redirected takes precedence over being blocked.
-* Try to use reject policy as the missing host key policy along with your verified known_hosts, this will prevent man-in-the-middle attacks. The idea is that it checks the system host keys file("~/.ssh/known_hosts") and the application host keys file("./known_hosts") in order, if the ssh server's hostname is not found or the key is not matched, the connection will be aborted.
+* Какой бы способ развёртывания вы ни выбрали, не забудьте включить SSL.
+* По умолчанию обычные http-запросы из публичной сети либо перенаправляются, либо блокируются; перенаправление имеет приоритет над блокировкой.
+* Старайтесь использовать политику reject для неизвестных ключей хоста вместе с проверенным known_hosts — это защищает от атак «человек посередине». Приложение по очереди проверяет системный файл ключей хостов (`~/.ssh/known_hosts`) и файл ключей приложения (`./known_hosts`); если имя SSH-сервера не найдено или ключ не совпадает, подключение прерывается.
