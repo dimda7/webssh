@@ -1,0 +1,14 @@
+{% if signed_in_user %}
+<div class="signed-in">
+  <form id="signout" action="{{ signout_url }}" method="post">
+    {{ signed_in_user.fullname }}
+    &middot; <a href="{{ account_url }}">Account</a>
+    {% if signed_in_user.is_admin %}
+    &middot; <a href="{{ admin_users_url }}">Users</a>
+    {% end %}
+    &middot;
+    {% module xsrf_form_html() %}
+    <button type="submit" class="btn btn-link">Sign out</button>
+  </form>
+</div>
+{% end %}

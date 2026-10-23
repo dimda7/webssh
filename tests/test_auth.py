@@ -42,6 +42,7 @@ class SignInTestBase(AsyncHTTPTestCase):
         self.tmpdir = tempfile.mkdtemp()
         self.authdb = os.path.join(self.tmpdir, 'users.db')
         self.jar = {'_xsrf': 'yummy'}
+        self.prepare_db()
 
         env = {}
         if self.init_user is not None:
@@ -64,6 +65,9 @@ class SignInTestBase(AsyncHTTPTestCase):
         options.authtimeout = self.authtimeout
         return make_app(make_handlers(self.io_loop, options),
                         get_app_settings(options))
+
+    def prepare_db(self):
+        """Arranges the DB before webssh starts on it."""
 
     def tearDown(self):
         super(SignInTestBase, self).tearDown()

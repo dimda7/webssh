@@ -1,6 +1,7 @@
 import functools
 import json
 import logging
+import re
 import sqlite3
 import time
 
@@ -11,6 +12,8 @@ import bcrypt
 
 # bcrypt only looks at the first 72 bytes and bcrypt>=5 refuses longer input
 MAX_PASSWORD_BYTES = 72
+MIN_PASSWORD_LENGTH = 8
+USERNAME_RE = re.compile(r'[A-Za-z0-9._-]{1,64}')
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS users (
@@ -20,32 +23,66 @@ CREATE TABLE IF NOT EXISTS users (
     lastname TEXT,
     middlename TEXT,
     password TEXT,
-    active BOOLEAN NOT NULL DEFAULT 1
+    active BOOLEAN NOT NULL DEFAULT 1,
+    is_admin BOOLEAN NOT NULL DEFAULT 0,
+    session_version INTEGER NOT NULL DEFAULT 0
 )
 '''
+
+# columns added after the first release, for tables created before them
+ADDED_COLUMNS = (
+    ('is_admin', 'BOOLEAN NOT NULL DEFAULT 0'),
+    ('session_version', 'INTEGER NOT NULL DEFAULT 0'),
+)
 
 
 class ConfigError(Exception):
     """Sign-in is misconfigured, webssh can not start."""
 
 
+def is_yes(value):
+    # hand-edited rows may hold 'false' or 'no': anything but an explicit
+    # yes counts as no
+    return str(value).strip().lower() in ('1', 'true')
+
+
 class User(object):
 
-    def __init__(self, id, username, firstname, lastname, middlename,
-                 password, active):
-        self.id = id
-        self.username = username
-        self.password = password
-        # hand-edited rows may hold 'false' or 'no': anything but an
-        # explicit yes counts as inactive
-        self.active = str(active).strip().lower() in ('1', 'true')
+    def __init__(self, row):
+        self.id = row['id']
+        self.username = row['username']
+        self.firstname = row['firstname']
+        self.lastname = row['lastname']
+        self.middlename = row['middlename']
+        self.password = row['password']
+        self.active = is_yes(row['active'])
+        self.is_admin = is_yes(row['is_admin'])
+        self.session_version = row['session_version']
         self.fullname = ' '.join(
-            filter(None, [lastname, firstname, middlename])
-        ) or username
+            filter(None, [self.lastname, self.firstname, self.middlename])
+        ) or self.username
 
 
 def hash_password(password):
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def username_error(username):
+    if not USERNAME_RE.fullmatch(username):
+        return ('Username must be 1 to 64 Latin letters, digits, '
+                'dots, underscores or dashes')
+    return None
+
+
+def password_error(password, repeated):
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return 'Password must be at least {} characters'.format(
+            MIN_PASSWORD_LENGTH)
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        return 'Password must be at most {} bytes'.format(MAX_PASSWORD_BYTES)
+    if password != repeated:
+        return 'Passwords do not match'
+    return None
 
 
 class UserStore(object):
@@ -54,28 +91,108 @@ class UserStore(object):
         self.path = path
         try:
             self.conn = sqlite3.connect(path)
+            self.conn.row_factory = sqlite3.Row
             with self.conn:
                 self.conn.execute(SCHEMA)
+                self.add_missing_columns()
         except sqlite3.Error as exc:
             raise ConfigError('Can not open {!r}: {}'.format(path, exc))
+
+    def add_missing_columns(self):
+        existing = {row['name'] for row in
+                    self.conn.execute('PRAGMA table_info(users)')}
+        for name, definition in ADDED_COLUMNS:
+            if name not in existing:
+                self.conn.execute('ALTER TABLE users ADD COLUMN {} {}'
+                                  .format(name, definition))
 
     def is_empty(self):
         return self.conn.execute('SELECT 1 FROM users LIMIT 1').fetchone() \
             is None
 
-    def add(self, username, password):
+    def add(self, username, password, is_admin=False):
         with self.conn:
             self.conn.execute(
-                'INSERT INTO users (username, password) VALUES (?, ?)',
-                (username, hash_password(password))
+                'INSERT INTO users (username, password, is_admin) '
+                'VALUES (?, ?, ?)',
+                (username, hash_password(password), int(is_admin))
             )
+
+    def create(self, username, password_hash, is_admin=False,
+               firstname=None, lastname=None, middlename=None):
+        with self.conn:
+            self.conn.execute(
+                'INSERT INTO users (username, password, is_admin, firstname, '
+                'lastname, middlename) VALUES (?, ?, ?, ?, ?, ?)',
+                (username, password_hash, int(is_admin), firstname or None,
+                 lastname or None, middlename or None)
+            )
+
+    def update_names(self, user_id, firstname, lastname, middlename):
+        with self.conn:
+            self.conn.execute(
+                'UPDATE users SET firstname = ?, lastname = ?, '
+                'middlename = ? WHERE id = ?',
+                (firstname or None, lastname or None, middlename or None,
+                 user_id)
+            )
+
+    def set_password(self, user_id, password_hash):
+        """Also ends every session of the user (ADR 0002)."""
+        with self.conn:
+            self.conn.execute(
+                'UPDATE users SET password = ?, '
+                'session_version = session_version + 1 WHERE id = ?',
+                (password_hash, user_id)
+            )
+
+    def end_sessions(self, user_id):
+        with self.conn:
+            self.conn.execute(
+                'UPDATE users SET session_version = session_version + 1 '
+                'WHERE id = ?', (user_id,)
+            )
+
+    def set_active(self, user_id, active):
+        with self.conn:
+            self.conn.execute('UPDATE users SET active = ? WHERE id = ?',
+                              (int(active), user_id))
+
+    def set_admin(self, user_id, is_admin):
+        with self.conn:
+            self.conn.execute('UPDATE users SET is_admin = ? WHERE id = ?',
+                              (int(is_admin), user_id))
+
+    def is_username_taken(self, username):
+        return self.conn.execute(
+            'SELECT 1 FROM users WHERE lower(username) = lower(?)',
+            (username,)
+        ).fetchone() is not None
 
     def _find_by(self, column, value):
         row = self.conn.execute(
-            'SELECT id, username, firstname, lastname, middlename, password, '
-            'active FROM users WHERE {} = ?'.format(column), (value,)
+            'SELECT * FROM users WHERE {} = ?'.format(column), (value,)
         ).fetchone()
-        return User(*row) if row else None
+        return User(row) if row else None
+
+    def list(self):
+        return [User(row) for row in
+                self.conn.execute('SELECT * FROM users ORDER BY username')]
+
+    def ensure_administrator(self):
+        """Makes the oldest active user an Administrator if there is none.
+
+        Databases created before administration existed have none.
+        """
+        active = sorted((u for u in self.list() if u.active),
+                        key=lambda u: u.id)
+        if not active or any(u.is_admin for u in active):
+            return
+        with self.conn:
+            self.conn.execute('UPDATE users SET is_admin = 1 WHERE id = ?',
+                              (active[0].id,))
+        logging.warning('No active administrator, made {!r} one'
+                        .format(active[0].username))
 
     def find(self, username):
         return self._find_by('username', username)
@@ -90,6 +207,7 @@ class UserStore(object):
                 logging.warning(
                     'users table is not empty, WSSH_INIT_* ignored'
                 )
+            self.ensure_administrator()
             return
 
         if not username or not password:
@@ -100,8 +218,8 @@ class UserStore(object):
         if len(password.encode()) > MAX_PASSWORD_BYTES:
             raise ConfigError('WSSH_INIT_PASSWORD must be at most {} bytes'
                               .format(MAX_PASSWORD_BYTES))
-        self.add(username, password)
-        logging.info('Created user {!r}'.format(username))
+        self.add(username, password, is_admin=True)
+        logging.info('Created administrator {!r}'.format(username))
 
 
 @functools.lru_cache(maxsize=None)
@@ -132,30 +250,36 @@ def check_password(user, password):
 class Session(object):
     """What the signed session cookie holds about the signed-in user.
 
-    Only the id: everything else about the user is read from the DB, so
-    edits there take effect at once.
+    The id and the user's session_version (ADR 0002): everything else is
+    read from the DB, so edits there take effect at once, and bumping the
+    version ends every session of that user.
     """
 
-    def __init__(self, user_id, last_activity):
+    def __init__(self, user_id, version, last_activity):
         self.user_id = user_id
+        self.version = version
         self.last_activity = last_activity
 
     @classmethod
     def for_user(cls, user):
-        return cls(user.id, time.time())
+        return cls(user.id, user.session_version, time.time())
 
     @classmethod
     def from_json(cls, value):
         try:
             data = json.loads(value)
-            session = cls(data['user_id'], float(data['last_activity']))
+            session = cls(data['user_id'], int(data['version']),
+                          float(data['last_activity']))
         except (ValueError, TypeError, KeyError):
             return None
         return session if session.user_id else None
 
     def to_json(self):
-        return json.dumps(dict(user_id=self.user_id,
+        return json.dumps(dict(user_id=self.user_id, version=self.version,
                                last_activity=self.last_activity))
+
+    def belongs_to(self, user):
+        return self.version == user.session_version
 
     def is_expired(self, timeout):
         return time.time() - self.last_activity > timeout

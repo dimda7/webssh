@@ -25,15 +25,7 @@
         margin-left: 5px;
       }
 
-      .signed-in {
-        text-align: right;
-      }
-
-      .signed-in .btn {
-        margin-top: 0;
-        padding: 0;
-        vertical-align: baseline;
-      }
+      {% include nav-style.html %}
       {% if font.family %}
       @font-face {
         font-family: '{{ font.family }}';
@@ -50,15 +42,7 @@
     <div id="waiter" style="display: none"> Connecting ... </div>
 
     <div class="container form-container" style="display: none">
-      {% if user %}
-      <div class="signed-in">
-        <form id="signout" action="{{ signout_url }}" method="post">
-          {{ user.fullname }} &middot;
-          {% module xsrf_form_html() %}
-          <button type="submit" class="btn btn-link">Sign out</button>
-        </form>
-      </div>
-      {% end %}
+      {% include nav.html %}
       <form id="connect" action="" method="post" enctype="multipart/form-data"{% if debug %} novalidate{% end %}>
         <div class="row">
           <div class="col">

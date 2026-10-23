@@ -7,8 +7,9 @@ from tornado.options import options
 from webssh import handler
 from webssh.handler import (
     IndexHandler, WsockHandler, NotFoundHandler, SignInHandler,
-    SignOutHandler, SIGNIN_URL, SIGNOUT_URL
+    SignOutHandler, SIGNIN_URL, SIGNOUT_URL, ADMIN_USERS_URL, ACCOUNT_URL
 )
+from webssh.admin import AccountHandler, UserHandler, UsersHandler
 from webssh.signin import ConfigError
 from webssh.settings import (
     get_app_settings,  get_host_keys_settings, get_policy_setting,
@@ -28,7 +29,10 @@ def make_handlers(loop, options):
     if options.authdb:
         handlers += [
             (SIGNIN_URL, SignInHandler),
-            (SIGNOUT_URL, SignOutHandler)
+            (SIGNOUT_URL, SignOutHandler),
+            (ADMIN_USERS_URL, UsersHandler),
+            (ADMIN_USERS_URL + r'/(\d+)', UserHandler),
+            (ACCOUNT_URL, AccountHandler)
         ]
     return handlers
 

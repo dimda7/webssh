@@ -33,8 +33,12 @@ except ImportError:
 
 
 DEFAULT_PORT = 22
+# bcrypt is slow on purpose: never run it on the IOLoop
+password_executor = ThreadPoolExecutor(max_workers=cpu_count())
 SIGNIN_URL = '/auth/signin'
 SIGNOUT_URL = '/auth/signout'
+ADMIN_USERS_URL = '/admin/users'
+ACCOUNT_URL = '/account'
 
 swallow_http_errors = True
 redirecting = None
@@ -315,8 +319,8 @@ class SessionMixin(object):
     def get_signed_in_session(self):
         """Returns the session of the signed-in user, or None.
 
-        Sets signed_in_user. A session idle for too long, or of a user who
-        is gone or inactive, is cleared.
+        Sets signed_in_user. A session idle for too long, of a user who is
+        gone or inactive, or ended by a newer session_version is cleared.
         """
         value = self.get_signed_cookie(self.session_cookie)
         session = Session.from_json(value) if value else None
@@ -324,7 +328,7 @@ class SessionMixin(object):
             return None
 
         user = self.settings['user_store'].find_by_id(session.user_id)
-        if not user or not user.active or \
+        if not user or not user.active or not session.belongs_to(user) or \
                 session.is_expired(self.settings['signin_timeout']):
             self.clear_cookie(self.session_cookie)
             return None
@@ -333,6 +337,22 @@ class SessionMixin(object):
 
     def next_url(self):
         return safe_next_url(self.get_argument('next', u''))
+
+    def get_raw_argument(self, name):
+        # get_argument() strips spaces and turns control characters into
+        # spaces, which would change a password
+        values = self.request.body_arguments.get(name)
+        if not values:
+            return u''
+        return self.decode_argument(values[-1], name=name)
+
+    def get_template_namespace(self):
+        namespace = super(SessionMixin, self).get_template_namespace()
+        namespace.update(
+            signed_in_user=self.signed_in_user, signout_url=SIGNOUT_URL,
+            admin_users_url=ADMIN_USERS_URL, account_url=ACCOUNT_URL
+        )
+        return namespace
 
     def save_session(self, session):
         self.set_signed_cookie(
@@ -391,8 +411,6 @@ class SignInRequiredMixin(SessionMixin):
 
 class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
-    executor = ThreadPoolExecutor(max_workers=cpu_count())
-
     error_message = 'Invalid username or password'
     blocked_message = 'Too many attempts, try later'
 
@@ -417,8 +435,8 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
         # the sqlite3 connection belongs to the IOLoop thread, bcrypt does not
         user = self.settings['user_store'].find(username)
-        matched = yield self.executor.submit(
-            check_password, user, self.get_raw_password()
+        matched = yield password_executor.submit(
+            check_password, user, self.get_raw_argument('password')
         )
         if not matched:
             self.render('signin.html', error=self.error_message)
@@ -427,14 +445,6 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
         limiter.forget(ip, username)
         self.save_session(Session.for_user(user))
         self.redirect(self.next_url(), status=303)
-
-    def get_raw_password(self):
-        # get_argument() strips spaces and turns control characters into
-        # spaces, which would change the password
-        values = self.request.body_arguments.get('password')
-        if not values:
-            return u''
-        return self.decode_argument(values[-1], name='password')
 
 
 class SignOutHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
@@ -630,8 +640,7 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
         pass
 
     def get(self):
-        self.render('index.html', debug=self.debug, font=self.font,
-                    user=self.signed_in_user, signout_url=SIGNOUT_URL)
+        self.render('index.html', debug=self.debug, font=self.font)
 
     @tornado.gen.coroutine
     def post(self):
