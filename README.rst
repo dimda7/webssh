@@ -1,11 +1,11 @@
 WebSSH
 ------
 
-|PyPI - Python Version|
+|CI| |PyPI - Python Version|
 
     Форк `huashengdun/webssh <https://github.com/huashengdun/webssh>`_
-    с несколькими доработками клиента и готовой настройкой HTTPS для
-    Docker. Подробнее — в разделе `Изменения форка`_.
+    с входом в webssh по имени пользователя и паролю, несколькими
+    доработками клиента и готовой настройкой HTTPS для Docker. Подробнее — в разделе `Изменения форка`_.
 
 Введение
 ~~~~~~~~
@@ -217,6 +217,10 @@ SQLite, таблица создаётся автоматически.
 -  ``--authtimeout`` — через сколько секунд бездействия нужно войти
    заново (по умолчанию 3600). Уже открытые терминалы при этом не
    обрываются.
+-  Кнопка Sign out над формой Connect завершает сессию. Cookie сессии
+   живёт до закрытия браузера.
+-  После входа webssh возвращает на страницу, которая его потребовала,
+   вместе с `параметрами в URL <#параметры-в-url>`_.
 -  После 5 неудачных попыток входа за 5 минут с одного IP вход временно
    блокируется. IP берётся из заголовков ``X-Real-Ip``/``X-Forwarded-For``,
    если включён ``--xheaders`` (по умолчанию включён). Если перед webssh
@@ -224,8 +228,46 @@ SQLite, таблица создаётся автоматически.
    с ``--xheaders=False``: иначе клиент подставит в заголовок любой IP и
    обойдёт ограничение. В ``docker-compose.yml`` так и сделано.
 
-Добавлять пользователей и менять пароли пока можно только напрямую в
-базе: админки ещё нет.
+Управление пользователями
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Админки пока нет, пользователей меняют прямо в базе. Изменения
+действуют сразу, перезапускать webssh не нужно: отключённый
+пользователь теряет доступ на следующем же запросе. Команды ниже
+запускаются там, где установлен webssh (нужен ``bcrypt``); в Docker —
+через ``docker-compose exec web`` и с путём ``/data/users.db``. Пароль в
+командной строке попадает в историю shell, поэтому после смены пароля
+её стоит почистить.
+
+Добавить пользователя
+
+.. code:: bash
+
+    python -c "import bcrypt, sqlite3, sys; db, user, pw = sys.argv[1:]; c = sqlite3.connect(db); c.execute('INSERT INTO users (username, password) VALUES (?, ?)', (user, bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode())); c.commit()" users.db bob 'пароль'
+
+Сменить пароль
+
+.. code:: bash
+
+    python -c "import bcrypt, sqlite3, sys; db, user, pw = sys.argv[1:]; c = sqlite3.connect(db); c.execute('UPDATE users SET password = ? WHERE username = ?', (bcrypt.hashpw(pw.encode(), bcrypt.gensalt()).decode(), user)); c.commit()" users.db bob 'новый пароль'
+
+Отключить пользователя (включить обратно — ``active = 1``)
+
+.. code:: bash
+
+    python -c "import sqlite3, sys; db, user = sys.argv[1:]; c = sqlite3.connect(db); c.execute('UPDATE users SET active = 0 WHERE username = ?', (user,)); c.commit()" users.db bob
+
+Имя, которое показывается над формой (``lastname firstname
+middlename``; если не задано — имя пользователя)
+
+.. code:: bash
+
+    python -c "import sqlite3, sys; db, user, first, last = sys.argv[1:]; c = sqlite3.connect(db); c.execute('UPDATE users SET firstname = ?, lastname = ? WHERE username = ?', (first, last, user)); c.commit()" users.db bob 'Борис' 'Петров'
+
+Пароль должен быть не длиннее 72 байт (ограничение bcrypt; кириллица
+занимает 2 байта на символ). В поле ``password`` должен лежать
+bcrypt-хэш, а не сам пароль: пользователь с паролем открытым текстом
+войти не сможет.
 
 Запуск в Docker
 ~~~~~~~~~~~~~~~
@@ -267,7 +309,7 @@ Compose-файл ожидает сертификат и ключ в папке `
 
 ::
 
-    pip install pytest pytest-cov codecov flake8 mock
+    pip install pytest pytest-cov flake8 -r requirements.txt
 
 Запуск всех тестов через unittest
 
@@ -289,6 +331,14 @@ Compose-файл ожидает сертификат и ключ в папке `
 .. code:: bash
 
     wssh --address='127.0.0.1' --port=8888 --policy=reject
+
+С включённым входом в webssh добавьте ``--tdstream=127.0.0.1``: тогда
+webssh принимает запросы только от Nginx, и IP клиента для ограничения
+попыток входа берётся из заголовков, которые выставляет Nginx.
+
+.. code:: bash
+
+    wssh --address='127.0.0.1' --port=8888 --policy=reject --tdstream=127.0.0.1 --authdb=/path/to/users.db
 
 .. code:: nginx
 
@@ -325,6 +375,8 @@ Compose-файл ожидает сертификат и ключ в папке `
    (``./known_hosts``); если имя SSH-сервера не найдено или ключ не
    совпадает, подключение прерывается.
 
+.. |CI| image:: https://github.com/dimda7/webssh/actions/workflows/python.yml/badge.svg
+   :target: https://github.com/dimda7/webssh/actions/workflows/python.yml
 .. |PyPI - Python Version| image:: https://img.shields.io/pypi/pyversions/webssh.svg
 .. |Login| image:: https://github.com/dimda7/webssh/raw/master/preview/login.png
 .. |Terminal| image:: https://github.com/dimda7/webssh/raw/master/preview/terminal.png
