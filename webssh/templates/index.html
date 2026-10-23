@@ -45,8 +45,8 @@
 
     {% if session %}
     <div class="container signed-in">
-      {{ session.get('fullname') or session.get('username') }}
-      &middot; <a href="/auth/signout">Sign out</a>
+      {{ session.fullname }}
+      &middot; <a href="{{ signout_url }}">Sign out</a>
     </div>
     {% end %}
 

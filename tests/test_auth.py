@@ -17,7 +17,7 @@ from tornado.httpclient import HTTPClientError, HTTPRequest
 from tornado.testing import AsyncHTTPTestCase, gen_test
 from tornado.options import options
 from tests.sshserver import run_ssh_server, banner
-from webssh.auth import hash_password
+from webssh.signin import hash_password
 from webssh.main import make_app, make_handlers
 from webssh.settings import get_app_settings, get_server_settings
 from webssh.utils import to_str
@@ -139,13 +139,13 @@ class TestSignIn(SignInTestBase):
             self.sign_in(username='bob', password='builder')
         )
 
-    def assert_relogin_json(self, response):
+    def assert_signin_required_json(self, response):
         self.assertEqual(response.code, 401)
         self.assertTrue(
             response.headers['Content-Type'].startswith('application/json')
         )
         data = json.loads(response.body)
-        self.assertIs(data['relogin'], True)
+        self.assertIs(data['signin_required'], True)
         self.assertEqual(data['location'], '/auth/signin')
 
     def test_ajax_connect_without_session_gets_401_json(self):
@@ -154,11 +154,19 @@ class TestSignIn(SignInTestBase):
                               _xsrf='yummy'),
             headers={'X-Requested-With': 'XMLHttpRequest'}
         )
-        self.assert_relogin_json(response)
+        self.assert_signin_required_json(response)
+
+    def test_ajax_connect_without_session_or_xsrf_gets_401_json(self):
+        self.jar.pop('_xsrf')
+        response = self.request(
+            '/', 'POST', dict(hostname='localhost', username='robey'),
+            headers={'X-Requested-With': 'XMLHttpRequest'}
+        )
+        self.assert_signin_required_json(response)
 
     def test_fetch_without_session_gets_401_json(self):
         response = self.request('/', headers={'Sec-Fetch-Mode': 'cors'})
-        self.assert_relogin_json(response)
+        self.assert_signin_required_json(response)
 
     def test_browser_navigation_without_session_is_redirected(self):
         response = self.request('/', headers={'Sec-Fetch-Mode': 'navigate'})
@@ -212,6 +220,14 @@ class TestSignInTimeout(SignInTestBase):
         self.assertEqual(response.code, 303)
         self.assertEqual(response.headers['Location'], '/auth/signin')
         self.assertNotIn('wssh_session', self.jar)
+
+    def test_signin_page_is_shown_directly_for_idle_session(self):
+        self.sign_in()
+        time.sleep(0.6)
+
+        response = self.request('/auth/signin')
+        self.assertEqual(response.code, 200)
+        self.assertIn(b'id="signin"', response.body)
 
     def test_activity_keeps_session_alive(self):
         self.sign_in()
@@ -288,7 +304,7 @@ class TestSignInStartup(unittest.TestCase):
         options.authdb = ''
         with mock.patch.dict(os.environ, {}, clear=True):
             settings = get_app_settings(options)
-        self.assertFalse(settings.get('auth_enabled'))
+        self.assertFalse(settings.get('signin_enabled'))
 
 
 class TestSignInInitEnvIgnoredOnceUsersExist(SignInTestBase):

@@ -5,7 +5,7 @@ import ssl
 import sys
 
 from tornado.options import define
-from webssh.auth import SignInLimiter, UserStore
+from webssh.signin import SignInLimiter, UserStore
 from webssh.policy import (
     load_host_keys, get_policy_class, check_policy_setting
 )
@@ -97,7 +97,7 @@ def get_app_settings(options):
         origin_policy=get_origin_setting(options)
     )
     if options.authdb:
-        settings.update(get_auth_settings(options))
+        settings.update(get_signin_settings(options))
     return settings
 
 
@@ -116,17 +116,17 @@ def get_cookie_secret(options):
     return secret
 
 
-def get_auth_settings(options):
+def get_signin_settings(options):
     cookie_secret = get_cookie_secret(options)
     user_store = UserStore(options.authdb)
     user_store.bootstrap(os.environ.get('WSSH_INIT_USER', ''),
                          os.environ.get('WSSH_INIT_PASSWORD', ''))
     return dict(
-        auth_enabled=True,
+        signin_enabled=True,
         cookie_secret=cookie_secret,
         user_store=user_store,
         signin_limiter=SignInLimiter(),
-        auth_timeout=options.authtimeout
+        signin_timeout=options.authtimeout
     )
 
 

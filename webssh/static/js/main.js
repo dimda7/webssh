@@ -395,7 +395,7 @@ jQuery(function($){
     pending_key = undefined;
 
     if (resp.status === 401 && resp.responseJSON &&
-        resp.responseJSON.relogin) {
+        resp.responseJSON.signin_required) {
       // the sign-in session is over
       window.location = resp.responseJSON.location;
       return;

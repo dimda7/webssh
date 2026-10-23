@@ -3,7 +3,6 @@ import json
 import logging
 import socket
 import struct
-import time
 import traceback
 import weakref
 import paramiko
@@ -13,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from tornado.ioloop import IOLoop
 from tornado.options import options
 from tornado.process import cpu_count
-from webssh.auth import authenticate
+from webssh.signin import Session, verify_sign_in
 from webssh.utils import (
     is_valid_ip_address, is_valid_port, is_valid_hostname, to_bytes, to_str,
     to_int, to_ip_address, UnicodeType, is_ip_hostname, is_same_primary_domain,
@@ -33,6 +32,8 @@ except ImportError:
 
 
 DEFAULT_PORT = 22
+SIGNIN_URL = '/auth/signin'
+SIGNOUT_URL = '/auth/signout'
 
 swallow_http_errors = True
 redirecting = None
@@ -309,50 +310,54 @@ class SessionMixin(object):
 
     session_cookie = 'wssh_session'
 
-    def get_session(self):
-        value = self.get_signed_cookie(self.session_cookie)
-        if not value:
-            return None
-        try:
-            session = json.loads(value)
-        except JSONDecodeError:
-            return None
-        return session if isinstance(session, dict) else None
+    def get_signed_in_session(self):
+        """Returns the session of the signed-in user, or None.
 
-    def set_session(self, session):
+        A session idle for too long is cleared.
+        """
+        value = self.get_signed_cookie(self.session_cookie)
+        session = Session.from_json(value) if value else None
+        if session and session.is_expired(self.settings['signin_timeout']):
+            self.clear_cookie(self.session_cookie)
+            return None
+        return session
+
+    def save_session(self, session):
         self.set_signed_cookie(
-            self.session_cookie, json.dumps(session), httponly=True,
+            self.session_cookie, session.to_json(), httponly=True,
             samesite='Lax', secure=self.request.protocol == 'https'
         )
 
 
-class AuthMixin(SessionMixin):
+class SignInRequiredMixin(SessionMixin):
     """Rejects requests without a signed-in user when sign-in is enabled."""
 
-    signin_url = '/auth/signin'
     current_session = None
 
+    def check_xsrf_cookie(self):
+        # deferred to prepare(), so that a request without a session gets
+        # the sign-in answer rather than a 403
+        if not self.settings.get('signin_enabled'):
+            super(SignInRequiredMixin, self).check_xsrf_cookie()
+
     def prepare(self):
-        if self._finished or not self.settings.get('auth_enabled'):
+        if self._finished or not self.settings.get('signin_enabled'):
             return
 
-        session = self.get_session()
-        if not session or not session.get('user_id'):
-            self.reject('Not signed in, please sign in again')
+        session = self.get_signed_in_session()
+        if not session:
+            self.reject()
             return
 
-        now = time.time()
-        last_activity = session.get('last_activity') or 0
-        if now - last_activity > self.settings['auth_timeout']:
-            self.clear_cookie(self.session_cookie)
-            self.reject('Session expired, please sign in again')
-            return
-
-        session['last_activity'] = now
-        self.set_session(session)
+        session.touch()
+        self.save_session(session)
         self.current_session = session
 
-    def is_fetch(self):
+        if self.request.method not in ('GET', 'HEAD', 'OPTIONS') and \
+                self.settings.get('xsrf_cookies'):
+            super(SignInRequiredMixin, self).check_xsrf_cookie()
+
+    def is_script_request(self):
         # fetch() and $.ajax() silently follow a redirect and hand the
         # sign-in page to the script, so they get a 401 they can act on
         headers = self.request.headers
@@ -361,14 +366,14 @@ class AuthMixin(SessionMixin):
         mode = headers.get('Sec-Fetch-Mode')
         return mode is not None and mode != 'navigate'
 
-    def reject(self, message):
-        if not self.is_fetch():
-            self.redirect(self.signin_url, status=303)
+    def reject(self):
+        if not self.is_script_request():
+            self.redirect(SIGNIN_URL, status=303)
             return
 
         self.set_status(401)
-        self.finish(dict(status='error', message=message, relogin=True,
-                         location=self.signin_url))
+        self.finish(dict(status='error', message='Please sign in again',
+                         signin_required=True, location=SIGNIN_URL))
 
 
 class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
@@ -377,8 +382,7 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
     blocked_message = 'Too many attempts, try later'
 
     def get(self):
-        session = self.get_session()
-        if session and session.get('user_id'):
+        if self.get_signed_in_session():
             self.redirect('/', status=303)
             return
         self.render('signin.html', error=None)
@@ -390,17 +394,15 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
             self.render('signin.html', error=self.blocked_message)
             return
 
-        user = authenticate(self.settings['user_store'],
-                            self.get_argument('username', u''),
-                            self.get_argument('password', u''))
+        user = verify_sign_in(self.settings['user_store'],
+                              self.get_argument('username', u''),
+                              self.get_argument('password', u''))
         if not user:
             limiter.add_failure(ip)
             self.render('signin.html', error=self.error_message)
             return
 
-        self.set_session(dict(user_id=user.id, username=user.username,
-                              fullname=user.fullname,
-                              last_activity=time.time()))
+        self.save_session(Session.for_user(user))
         self.redirect('/', status=303)
 
 
@@ -408,7 +410,7 @@ class SignOutHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
     def get(self):
         self.clear_cookie(self.session_cookie)
-        self.redirect(AuthMixin.signin_url, status=303)
+        self.redirect(SIGNIN_URL, status=303)
 
 
 class NotFoundHandler(MixinHandler, tornado.web.ErrorHandler):
@@ -420,7 +422,8 @@ class NotFoundHandler(MixinHandler, tornado.web.ErrorHandler):
         raise tornado.web.HTTPError(404)
 
 
-class IndexHandler(AuthMixin, MixinHandler, tornado.web.RequestHandler):
+class IndexHandler(SignInRequiredMixin, MixinHandler,
+                   tornado.web.RequestHandler):
 
     executor = ThreadPoolExecutor(max_workers=cpu_count()*5)
 
@@ -597,7 +600,7 @@ class IndexHandler(AuthMixin, MixinHandler, tornado.web.RequestHandler):
 
     def get(self):
         self.render('index.html', debug=self.debug, font=self.font,
-                    session=self.current_session)
+                    session=self.current_session, signout_url=SIGNOUT_URL)
 
     @tornado.gen.coroutine
     def post(self):
@@ -635,7 +638,7 @@ class IndexHandler(AuthMixin, MixinHandler, tornado.web.RequestHandler):
         self.write(self.result)
 
 
-class WsockHandler(AuthMixin, MixinHandler,
+class WsockHandler(SignInRequiredMixin, MixinHandler,
                    tornado.websocket.WebSocketHandler):
 
     def initialize(self, loop):
