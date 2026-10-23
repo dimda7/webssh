@@ -1,0 +1,3 @@
+# End sessions with a per-user session_version, not a server-side sessions table
+
+A changed password or "Sign out everywhere" must stop every existing session of that User, but sessions are signed cookies (see #1). Each User gets a `session_version` counter that the cookie carries; bumping it invalidates all of the User's cookies at once. The User is already read from the DB on every request, so the check costs nothing extra, whereas a sessions table would need a write per request and its own cleanup. The trade-off: one session can not be ended on its own, only all of a User's sessions together.
