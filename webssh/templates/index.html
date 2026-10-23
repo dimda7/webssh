@@ -50,10 +50,10 @@
     <div id="waiter" style="display: none"> Connecting ... </div>
 
     <div class="container form-container" style="display: none">
-      {% if session %}
+      {% if user %}
       <div class="signed-in">
         <form id="signout" action="{{ signout_url }}" method="post">
-          {{ session.fullname }} &middot;
+          {{ user.fullname }} &middot;
           {% module xsrf_form_html() %}
           <button type="submit" class="btn btn-link">Sign out</button>
         </form>

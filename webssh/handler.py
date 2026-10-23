@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from tornado.ioloop import IOLoop
 from tornado.options import options
 from tornado.process import cpu_count
-from webssh.signin import Session, check_password
+from webssh.signin import Session, check_password, safe_next_url
 from webssh.utils import (
     is_valid_ip_address, is_valid_port, is_valid_hostname, to_bytes, to_str,
     to_int, to_ip_address, UnicodeType, is_ip_hostname, is_same_primary_domain,
@@ -26,8 +26,9 @@ except ImportError:
     JSONDecodeError = ValueError
 
 try:
-    from urllib.parse import urlparse
+    from urllib.parse import urlencode, urlparse
 except ImportError:
+    from urllib import urlencode
     from urlparse import urlparse
 
 
@@ -309,11 +310,13 @@ class MixinHandler(object):
 class SessionMixin(object):
 
     session_cookie = 'wssh_session'
+    signed_in_user = None
 
     def get_signed_in_session(self):
         """Returns the session of the signed-in user, or None.
 
-        A session idle for too long is cleared.
+        Sets signed_in_user. A session idle for too long, or of a user who
+        is gone or inactive, is cleared.
         """
         value = self.get_signed_cookie(self.session_cookie)
         session = Session.from_json(value) if value else None
@@ -325,7 +328,11 @@ class SessionMixin(object):
                 session.is_expired(self.settings['signin_timeout']):
             self.clear_cookie(self.session_cookie)
             return None
+        self.signed_in_user = user
         return session
+
+    def next_url(self):
+        return safe_next_url(self.get_argument('next', u''))
 
     def save_session(self, session):
         self.set_signed_cookie(
@@ -337,8 +344,6 @@ class SessionMixin(object):
 
 class SignInRequiredMixin(SessionMixin):
     """Rejects requests without a signed-in user when sign-in is enabled."""
-
-    current_session = None
 
     def check_xsrf_cookie(self):
         # deferred to prepare(), so that a request without a session gets
@@ -357,7 +362,6 @@ class SignInRequiredMixin(SessionMixin):
 
         session.touch()
         self.save_session(session)
-        self.current_session = session
 
         if self.request.method not in ('GET', 'HEAD', 'OPTIONS') and \
                 self.settings.get('xsrf_cookies'):
@@ -374,7 +378,10 @@ class SignInRequiredMixin(SessionMixin):
 
     def reject(self):
         if not self.is_script_request():
-            self.redirect(SIGNIN_URL, status=303)
+            url = SIGNIN_URL
+            if self.request.method == 'GET' and self.request.uri != '/':
+                url += '?' + urlencode(dict(next=self.request.uri))
+            self.redirect(url, status=303)
             return
 
         self.set_status(401)
@@ -391,7 +398,7 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
     def get(self):
         if self.get_signed_in_session():
-            self.redirect('/', status=303)
+            self.redirect(self.next_url(), status=303)
             return
         self.render('signin.html', error=None)
 
@@ -419,7 +426,7 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
         limiter.forget(ip, username)
         self.save_session(Session.for_user(user))
-        self.redirect('/', status=303)
+        self.redirect(self.next_url(), status=303)
 
     def get_raw_password(self):
         # get_argument() strips spaces and turns control characters into
@@ -624,7 +631,7 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
 
     def get(self):
         self.render('index.html', debug=self.debug, font=self.font,
-                    session=self.current_session, signout_url=SIGNOUT_URL)
+                    user=self.signed_in_user, signout_url=SIGNOUT_URL)
 
     @tornado.gen.coroutine
     def post(self):

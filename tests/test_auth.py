@@ -127,6 +127,65 @@ class TestSignIn(SignInTestBase):
     def test_unknown_username_is_rejected_with_the_same_message(self):
         self.assert_signin_rejected(self.sign_in(username='nobody'))
 
+    def add_user(self, username, password, active=1, **names):
+        conn = sqlite3.connect(self.authdb)
+        with conn:
+            conn.execute(
+                'INSERT INTO users (username, password, active, firstname, '
+                'lastname) VALUES (?, ?, ?, ?, ?)',
+                (username, password, active, names.get('firstname'),
+                 names.get('lastname'))
+            )
+        conn.close()
+
+    def test_user_whose_password_is_not_a_bcrypt_hash_is_rejected(self):
+        self.add_user('carol', 'plaintext')
+        self.assert_signin_rejected(
+            self.sign_in(username='carol', password='plaintext')
+        )
+
+    def test_user_with_active_set_to_text_false_is_rejected(self):
+        for value in ('false', 'no', ''):
+            self.add_user('dave' + value, hash_password('pw'), active=value)
+            self.assert_signin_rejected(
+                self.sign_in(username='dave' + value, password='pw')
+            )
+
+    def test_signin_returns_to_the_page_that_needed_it(self):
+        response = self.request('/?hostname=srv&command=pwd')
+        self.assertEqual(response.code, 303)
+        location = response.headers['Location']
+        self.assertTrue(location.startswith('/auth/signin?next='))
+
+        response = self.request(location, 'POST', dict(
+            username=self.init_user, password=self.init_password,
+            _xsrf='yummy'
+        ))
+        self.assertEqual(response.code, 303)
+        self.assertEqual(response.headers['Location'],
+                         '/?hostname=srv&command=pwd')
+
+    def test_signin_never_returns_to_another_site(self):
+        for target in ('//evil.example/', 'https://evil.example/',
+                       '/\\evil.example/', 'evil.example'):
+            self.jar.pop('wssh_session', None)
+            response = self.request(
+                '/auth/signin?' + urlencode(dict(next=target)), 'POST',
+                dict(username=self.init_user, password=self.init_password,
+                     _xsrf='yummy')
+            )
+            self.assertEqual(response.headers['Location'], '/', target)
+
+    def test_name_shown_follows_the_database(self):
+        self.sign_in()
+        conn = sqlite3.connect(self.authdb)
+        with conn:
+            conn.execute("UPDATE users SET firstname = 'Alice', "
+                         "lastname = 'Liddell' WHERE username = ?",
+                         (self.init_user,))
+        conn.close()
+        self.assertIn(b'Liddell Alice', self.request('/').body)
+
     def test_inactive_user_is_rejected_with_the_same_message(self):
         conn = sqlite3.connect(self.authdb)
         with conn:

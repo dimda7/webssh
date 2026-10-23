@@ -36,7 +36,9 @@ class User(object):
         self.id = id
         self.username = username
         self.password = password
-        self.active = bool(active)
+        # hand-edited rows may hold 'false' or 'no': anything but an
+        # explicit yes counts as inactive
+        self.active = str(active).strip().lower() in ('1', 'true')
         self.fullname = ' '.join(
             filter(None, [lastname, firstname, middlename])
         ) or username
@@ -117,34 +119,42 @@ def check_password(user, password):
     if len(secret) > MAX_PASSWORD_BYTES:
         return False
     hashed = user.password if user else None
-    matched = bcrypt.checkpw(secret, (hashed or dummy_hash()).encode())
+    try:
+        matched = bcrypt.checkpw(secret, (hashed or dummy_hash()).encode())
+    except ValueError:
+        logging.warning(
+            'Password of user {!r} is not a bcrypt hash'.format(user.username)
+        )
+        return False
     return bool(hashed and matched and user.active)
 
 
 class Session(object):
-    """What the signed session cookie holds about the signed-in user."""
+    """What the signed session cookie holds about the signed-in user.
 
-    def __init__(self, user_id, fullname, last_activity):
+    Only the id: everything else about the user is read from the DB, so
+    edits there take effect at once.
+    """
+
+    def __init__(self, user_id, last_activity):
         self.user_id = user_id
-        self.fullname = fullname
         self.last_activity = last_activity
 
     @classmethod
     def for_user(cls, user):
-        return cls(user.id, user.fullname, time.time())
+        return cls(user.id, time.time())
 
     @classmethod
     def from_json(cls, value):
         try:
             data = json.loads(value)
-            session = cls(data['user_id'], data['fullname'],
-                          float(data['last_activity']))
+            session = cls(data['user_id'], float(data['last_activity']))
         except (ValueError, TypeError, KeyError):
             return None
         return session if session.user_id else None
 
     def to_json(self):
-        return json.dumps(dict(user_id=self.user_id, fullname=self.fullname,
+        return json.dumps(dict(user_id=self.user_id,
                                last_activity=self.last_activity))
 
     def is_expired(self, timeout):
@@ -166,18 +176,28 @@ class SignInLimiter(object):
 
     def __init__(self):
         self.attempts = {}
+        self.last_sweep = time.time()
 
-    def prune(self):
+    def prune(self, ip):
+        attempts = self.attempts.get(ip)
         threshold = time.time() - self.window
+        while attempts and attempts[0][0] < threshold:
+            attempts.popleft()
+        if attempts is not None and not attempts:
+            del self.attempts[ip]
+
+    def sweep(self):
+        # IPs that never come back are dropped once per window, not on
+        # every attempt
+        if time.time() - self.last_sweep < self.window:
+            return
+        self.last_sweep = time.time()
         for ip in list(self.attempts):
-            attempts = self.attempts[ip]
-            while attempts and attempts[0][0] < threshold:
-                attempts.popleft()
-            if not attempts:
-                del self.attempts[ip]
+            self.prune(ip)
 
     def is_blocked(self, ip):
-        self.prune()
+        self.sweep()
+        self.prune(ip)
         return len(self.attempts.get(ip, ())) >= self.limit
 
     def add_attempt(self, ip, username):
@@ -190,3 +210,12 @@ class SignInLimiter(object):
             self.attempts[ip] = attempts
         else:
             self.attempts.pop(ip, None)
+
+
+def safe_next_url(url):
+    """The page to return to after sign-in: a path on this site, or '/'."""
+    # '//host' and '/\\host' are taken by browsers as another site
+    if not url.startswith('/') or url.startswith('//') or \
+            url.startswith('/\\'):
+        return '/'
+    return url
