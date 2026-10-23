@@ -1,9 +1,11 @@
 import re
 import sqlite3
 
+import tornado.gen
+
 from tornado.options import options
 from tornado.testing import AsyncHTTPTestCase
-from tests.test_auth import SignInTestBase
+from tests.test_auth import SignInTestBase, urlencode
 from webssh.main import make_app, make_handlers
 from webssh.settings import get_app_settings
 from webssh.signin import hash_password
@@ -94,7 +96,7 @@ class TestCreateUser(AdminTestBase):
         self.assertNotIn(b'href="/admin/users"', self.request('/').body)
 
     def test_created_administrator_can_manage_users(self):
-        self.create(is_admin='on')
+        self.create(is_administrator='on')
         self.sign_in_as('bob')
         self.assertEqual(self.request('/admin/users').code, 200)
 
@@ -119,6 +121,27 @@ class TestCreateUser(AdminTestBase):
     def test_mismatched_passwords_are_refused(self):
         self.assert_create_refused('Passwords do not match',
                                    password2='password2')
+
+    def test_concurrent_creates_in_different_case_make_one_user(self):
+        bodies = [urlencode(dict(username=name, password='password1',
+                                 password2='password1', _xsrf='yummy'))
+                  for name in ('bob', 'Bob', 'bob')]
+        cookie = self.cookie_header()
+
+        @tornado.gen.coroutine
+        def create_all():
+            responses = yield [self.http_client.fetch(
+                self.get_url('/admin/users'), method='POST', body=body,
+                headers={'Cookie': cookie}, follow_redirects=False,
+                raise_error=False
+            ) for body in bodies]
+            return responses
+
+        responses = self.io_loop.run_sync(create_all, timeout=30)
+        self.assertEqual(sorted(r.code for r in responses), [200, 200, 303])
+        for response in responses:
+            if response.code == 200:
+                self.assertIn(b'Username is taken', response.body)
 
     def test_password_is_taken_verbatim(self):
         self.create(password=' spaced pw ', password2=' spaced pw ')
@@ -218,6 +241,19 @@ class TestDeactivateAndAdministration(AdminTestBase):
         self.act('bob', 'revoke')
         self.assertEqual(self.as_bob('/admin/users').code, 403)
 
+    def test_administrator_sets_own_password_only_in_their_profile(self):
+        url = self.user_url(self.init_user)
+        self.assertNotIn(b'id="password"', self.request(url).body)
+
+        response = self.act(self.init_user, 'password',
+                            password='new password', password2='new password')
+        self.assertEqual(response.code, 200)
+        self.assertIn(b'Change your own password in My profile',
+                      response.body)
+        self.assertEqual(self.request('/').code, 200)
+        self.jar = {'_xsrf': 'yummy'}
+        self.sign_in_as(self.init_user, self.init_password)
+
     def test_administrator_can_not_deactivate_themselves(self):
         response = self.act(self.init_user, 'deactivate')
         self.assertEqual(response.code, 200)
@@ -232,10 +268,10 @@ class TestDeactivateAndAdministration(AdminTestBase):
         self.assertEqual(self.request('/admin/users').code, 200)
 
 
-class TestAccount(AdminTestBase):
+class TestProfile(AdminTestBase):
 
     def setUp(self):
-        super(TestAccount, self).setUp()
+        super(TestProfile, self).setUp()
         self.add_user('bob')
         self.sign_in_as('bob')
         self.other_jar = self.jar
@@ -255,8 +291,8 @@ class TestAccount(AdminTestBase):
             password2=new if repeated is None else repeated, _xsrf='yummy'
         ))
 
-    def test_every_user_has_an_account_link(self):
-        self.assertIn(b'href="/account"', self.request('/').body)
+    def test_every_user_has_a_profile_link(self):
+        self.assertIn(b'href="/account">My profile<', self.request('/').body)
         self.assertEqual(self.request('/account').code, 200)
 
     def test_wrong_current_password_is_refused(self):

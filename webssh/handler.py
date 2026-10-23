@@ -12,7 +12,8 @@ from concurrent.futures import ThreadPoolExecutor
 from tornado.ioloop import IOLoop
 from tornado.options import options
 from tornado.process import cpu_count
-from webssh.signin import Session, check_password, safe_next_url
+from webssh.signin import Session, check_password_off_loop, safe_next_url
+from webssh.urls import PROFILE_URL, SIGNIN_URL, SIGNOUT_URL, USERS_URL
 from webssh.utils import (
     is_valid_ip_address, is_valid_port, is_valid_hostname, to_bytes, to_str,
     to_int, to_ip_address, UnicodeType, is_ip_hostname, is_same_primary_domain,
@@ -33,12 +34,6 @@ except ImportError:
 
 
 DEFAULT_PORT = 22
-# bcrypt is slow on purpose: never run it on the IOLoop
-password_executor = ThreadPoolExecutor(max_workers=cpu_count())
-SIGNIN_URL = '/auth/signin'
-SIGNOUT_URL = '/auth/signout'
-ADMIN_USERS_URL = '/admin/users'
-ACCOUNT_URL = '/account'
 
 swallow_http_errors = True
 redirecting = None
@@ -350,7 +345,7 @@ class SessionMixin(object):
         namespace = super(SessionMixin, self).get_template_namespace()
         namespace.update(
             signed_in_user=self.signed_in_user, signout_url=SIGNOUT_URL,
-            admin_users_url=ADMIN_USERS_URL, account_url=ACCOUNT_URL
+            users_url=USERS_URL, profile_url=PROFILE_URL
         )
         return namespace
 
@@ -435,8 +430,8 @@ class SignInHandler(SessionMixin, MixinHandler, tornado.web.RequestHandler):
 
         # the sqlite3 connection belongs to the IOLoop thread, bcrypt does not
         user = self.settings['user_store'].find(username)
-        matched = yield password_executor.submit(
-            check_password, user, self.get_raw_argument('password')
+        matched = yield check_password_off_loop(
+            user, self.get_raw_argument('password')
         )
         if not matched:
             self.render('signin.html', error=self.error_message)

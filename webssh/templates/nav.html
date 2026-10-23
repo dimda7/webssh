@@ -2,9 +2,9 @@
 <div class="signed-in">
   <form id="signout" action="{{ signout_url }}" method="post">
     {{ signed_in_user.fullname }}
-    &middot; <a href="{{ account_url }}">Account</a>
-    {% if signed_in_user.is_admin %}
-    &middot; <a href="{{ admin_users_url }}">Users</a>
+    &middot; <a href="{{ profile_url }}">My profile</a>
+    {% if signed_in_user.is_administrator %}
+    &middot; <a href="{{ users_url }}">Users</a>
     {% end %}
     &middot;
     {% module xsrf_form_html() %}

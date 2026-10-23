@@ -6,8 +6,11 @@ import sqlite3
 import time
 
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 import bcrypt
+
+from tornado.process import cpu_count
 
 
 # bcrypt only looks at the first 72 bytes and bcrypt>=5 refuses longer input
@@ -46,21 +49,43 @@ def is_yes(value):
     return str(value).strip().lower() in ('1', 'true')
 
 
+class Names(object):
+    """A User's first, last and middle name, any of them may be missing."""
+
+    fields = ('firstname', 'lastname', 'middlename')
+
+    def __init__(self, firstname=None, lastname=None, middlename=None):
+        self.firstname = firstname or None
+        self.lastname = lastname or None
+        self.middlename = middlename or None
+
+    def values(self):
+        return tuple(getattr(self, field) for field in self.fields)
+
+    def full(self):
+        return ' '.join(filter(None, [self.lastname, self.firstname,
+                                      self.middlename]))
+
+
 class User(object):
 
     def __init__(self, row):
         self.id = row['id']
         self.username = row['username']
-        self.firstname = row['firstname']
-        self.lastname = row['lastname']
-        self.middlename = row['middlename']
+        self.names = Names(*(row[field] for field in Names.fields))
         self.password = row['password']
         self.active = is_yes(row['active'])
-        self.is_admin = is_yes(row['is_admin'])
+        self.is_administrator = is_yes(row['is_admin'])
         self.session_version = row['session_version']
-        self.fullname = ' '.join(
-            filter(None, [self.lastname, self.firstname, self.middlename])
-        ) or self.username
+        self.fullname = self.names.full() or self.username
+
+
+class UsernameTaken(Exception):
+    """Another User already has this username, in any letter case."""
+
+
+class LastAdministrator(Exception):
+    """The change would leave no active Administrator."""
 
 
 def hash_password(password):
@@ -85,6 +110,12 @@ def password_error(password, repeated):
     return None
 
 
+# the same reading of hand-edited values as is_yes()
+SQL_YES = "lower(trim({})) IN ('1', 'true')"
+ACTIVE_ADMINISTRATOR = '({} AND {})'.format(
+    SQL_YES.format('is_admin'), SQL_YES.format('active'))
+
+
 class UserStore(object):
 
     def __init__(self, path):
@@ -94,47 +125,57 @@ class UserStore(object):
             self.conn.row_factory = sqlite3.Row
             with self.conn:
                 self.conn.execute(SCHEMA)
-                self.add_missing_columns()
+                self.upgrade_schema()
         except sqlite3.Error as exc:
             raise ConfigError('Can not open {!r}: {}'.format(path, exc))
 
-    def add_missing_columns(self):
+    def upgrade_schema(self):
         existing = {row['name'] for row in
                     self.conn.execute('PRAGMA table_info(users)')}
         for name, definition in ADDED_COLUMNS:
             if name not in existing:
                 self.conn.execute('ALTER TABLE users ADD COLUMN {} {}'
                                   .format(name, definition))
+        try:
+            self.conn.execute(
+                'CREATE UNIQUE INDEX IF NOT EXISTS users_username_any_case '
+                'ON users (lower(username))'
+            )
+        except sqlite3.IntegrityError:
+            logging.warning('Some usernames in {!r} differ only in letter '
+                            'case; rename them so they stay unique'
+                            .format(self.path))
 
     def is_empty(self):
         return self.conn.execute('SELECT 1 FROM users LIMIT 1').fetchone() \
             is None
 
-    def add(self, username, password, is_admin=False):
-        with self.conn:
-            self.conn.execute(
-                'INSERT INTO users (username, password, is_admin) '
-                'VALUES (?, ?, ?)',
-                (username, hash_password(password), int(is_admin))
-            )
+    def create(self, username, password_hash, is_administrator=False,
+               names=None):
+        names = names or Names()
+        try:
+            with self.conn:
+                self.conn.execute(
+                    'INSERT INTO users (username, password, is_admin, '
+                    'firstname, lastname, middlename) '
+                    'VALUES (?, ?, ?, ?, ?, ?)',
+                    (username, password_hash, int(is_administrator))
+                    + names.values()
+                )
+        except sqlite3.IntegrityError:
+            raise UsernameTaken(username)
 
-    def create(self, username, password_hash, is_admin=False,
-               firstname=None, lastname=None, middlename=None):
-        with self.conn:
-            self.conn.execute(
-                'INSERT INTO users (username, password, is_admin, firstname, '
-                'lastname, middlename) VALUES (?, ?, ?, ?, ?, ?)',
-                (username, password_hash, int(is_admin), firstname or None,
-                 lastname or None, middlename or None)
-            )
+    def is_username_taken(self, username):
+        return self.conn.execute(
+            'SELECT 1 FROM users WHERE lower(username) = lower(?)',
+            (username,)
+        ).fetchone() is not None
 
-    def update_names(self, user_id, firstname, lastname, middlename):
+    def update_names(self, user_id, names):
         with self.conn:
             self.conn.execute(
                 'UPDATE users SET firstname = ?, lastname = ?, '
-                'middlename = ? WHERE id = ?',
-                (firstname or None, lastname or None, middlename or None,
-                 user_id)
+                'middlename = ? WHERE id = ?', names.values() + (user_id,)
             )
 
     def set_password(self, user_id, password_hash):
@@ -153,27 +194,45 @@ class UserStore(object):
                 'WHERE id = ?', (user_id,)
             )
 
+    def _set_flag(self, column, user_id, value):
+        """Sets active or is_admin, keeping an active Administrator.
+
+        Turning a flag off is one statement that also checks another
+        active Administrator remains, so that it holds even with other
+        writers on the same DB file.
+        """
+        with self.conn:
+            if value:
+                self.conn.execute('UPDATE users SET {} = 1 WHERE id = ?'
+                                  .format(column), (user_id,))
+                return
+            changed = self.conn.execute(
+                'UPDATE users SET {column} = 0 WHERE id = ? AND (NOT '
+                '{active_admin} OR EXISTS (SELECT 1 FROM users WHERE '
+                'id != ? AND {active_admin}))'.format(
+                    column=column, active_admin=ACTIVE_ADMINISTRATOR),
+                (user_id, user_id)
+            ).rowcount
+        if not changed:
+            raise LastAdministrator()
+
     def set_active(self, user_id, active):
-        with self.conn:
-            self.conn.execute('UPDATE users SET active = ? WHERE id = ?',
-                              (int(active), user_id))
+        self._set_flag('active', user_id, active)
 
-    def set_admin(self, user_id, is_admin):
-        with self.conn:
-            self.conn.execute('UPDATE users SET is_admin = ? WHERE id = ?',
-                              (int(is_admin), user_id))
-
-    def is_username_taken(self, username):
-        return self.conn.execute(
-            'SELECT 1 FROM users WHERE lower(username) = lower(?)',
-            (username,)
-        ).fetchone() is not None
+    def set_administrator(self, user_id, is_administrator):
+        self._set_flag('is_admin', user_id, is_administrator)
 
     def _find_by(self, column, value):
         row = self.conn.execute(
             'SELECT * FROM users WHERE {} = ?'.format(column), (value,)
         ).fetchone()
         return User(row) if row else None
+
+    def find(self, username):
+        return self._find_by('username', username)
+
+    def find_by_id(self, user_id):
+        return self._find_by('id', user_id)
 
     def list(self):
         return [User(row) for row in
@@ -186,19 +245,11 @@ class UserStore(object):
         """
         active = sorted((u for u in self.list() if u.active),
                         key=lambda u: u.id)
-        if not active or any(u.is_admin for u in active):
+        if not active or any(u.is_administrator for u in active):
             return
-        with self.conn:
-            self.conn.execute('UPDATE users SET is_admin = 1 WHERE id = ?',
-                              (active[0].id,))
+        self.set_administrator(active[0].id, True)
         logging.warning('No active administrator, made {!r} one'
                         .format(active[0].username))
-
-    def find(self, username):
-        return self._find_by('username', username)
-
-    def find_by_id(self, user_id):
-        return self._find_by('id', user_id)
 
     def bootstrap(self, username, password):
         """Creates the first user, if the table is empty."""
@@ -218,7 +269,7 @@ class UserStore(object):
         if len(password.encode()) > MAX_PASSWORD_BYTES:
             raise ConfigError('WSSH_INIT_PASSWORD must be at most {} bytes'
                               .format(MAX_PASSWORD_BYTES))
-        self.add(username, password, is_admin=True)
+        self.create(username, hash_password(password), is_administrator=True)
         logging.info('Created administrator {!r}'.format(username))
 
 
@@ -245,6 +296,18 @@ def check_password(user, password):
         )
         return False
     return bool(hashed and matched and user.active)
+
+
+# bcrypt is slow on purpose: never run it on the IOLoop
+password_executor = ThreadPoolExecutor(max_workers=cpu_count())
+
+
+def hash_password_off_loop(password):
+    return password_executor.submit(hash_password, password)
+
+
+def check_password_off_loop(user, password):
+    return password_executor.submit(check_password, user, password)
 
 
 class Session(object):

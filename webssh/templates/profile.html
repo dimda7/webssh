@@ -1,5 +1,5 @@
 {% extends layout.html %}
-{% block title %}Account{% end %}
+{% block title %}My profile{% end %}
 {% block content %}
 <a href="/">&larr; Connect</a>
 <h4>{{ signed_in_user.username }}</h4>
@@ -8,7 +8,7 @@
 {% end %}
 
 <h5>Change password</h5>
-<form id="password" action="{{ account_url }}" method="post">
+<form id="password" action="{{ profile_url }}" method="post">
   <div class="row">
     <div class="col">
       <label for="current">Current password</label>
@@ -30,7 +30,7 @@
 </form>
 
 <h5 style="margin-top: 20px;">Sessions</h5>
-<form id="signout-everywhere" action="{{ account_url }}" method="post">
+<form id="signout-everywhere" action="{{ profile_url }}" method="post">
   <input type="hidden" name="action" value="signout_everywhere">
   {% module xsrf_form_html() %}
   <button type="submit" class="btn btn-danger">Sign out everywhere</button>

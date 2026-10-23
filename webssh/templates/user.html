@@ -1,7 +1,7 @@
 {% extends layout.html %}
 {% block title %}{{ user.username }}{% end %}
 {% block content %}
-<a href="{{ admin_users_url }}">&larr; Users</a>
+<a href="{{ users_url }}">&larr; Users</a>
 <h4>{{ user.username }}</h4>
 {% if error %}
 <div id="status" style="color: red;">{{ error }}</div>
@@ -12,15 +12,15 @@
   <div class="row">
     <div class="col">
       <label for="lastname">Last name</label>
-      <input class="form-control" type="text" id="lastname" name="lastname" value="{{ user.lastname or '' }}">
+      <input class="form-control" type="text" id="lastname" name="lastname" value="{{ user.names.lastname or '' }}">
     </div>
     <div class="col">
       <label for="firstname">First name</label>
-      <input class="form-control" type="text" id="firstname" name="firstname" value="{{ user.firstname or '' }}">
+      <input class="form-control" type="text" id="firstname" name="firstname" value="{{ user.names.firstname or '' }}">
     </div>
     <div class="col">
       <label for="middlename">Middle name</label>
-      <input class="form-control" type="text" id="middlename" name="middlename" value="{{ user.middlename or '' }}">
+      <input class="form-control" type="text" id="middlename" name="middlename" value="{{ user.names.middlename or '' }}">
     </div>
   </div>
   <input type="hidden" name="action" value="names">
@@ -29,6 +29,9 @@
 </form>
 
 <h5 style="margin-top: 20px;">Password</h5>
+{% if is_self %}
+<p>Change your own password in <a href="{{ profile_url }}">My profile</a>.</p>
+{% else %}
 <form id="password" action="{{ page_url }}" method="post">
   <div class="row">
     <div class="col">
@@ -45,11 +48,12 @@
   <button type="submit" class="btn btn-primary">Set password</button>
   <small class="form-text text-muted">The user will be signed out everywhere.</small>
 </form>
+{% end %}
 
 <h5 style="margin-top: 20px;">Access</h5>
 <p>
   {{ 'Active' if user.active else 'Deactivated' }},
-  {{ 'Administrator' if user.is_admin else 'not an Administrator' }}.
+  {{ 'Administrator' if user.is_administrator else 'not an Administrator' }}.
 </p>
 <form id="access" action="{{ page_url }}" method="post">
   {% module xsrf_form_html() %}
@@ -58,7 +62,7 @@
   {% else %}
   <button type="submit" class="btn btn-primary" name="action" value="activate">Reactivate</button>
   {% end %}
-  {% if user.is_admin %}
+  {% if user.is_administrator %}
   <button type="submit" class="btn btn-secondary" name="action" value="revoke">Revoke administration</button>
   {% else %}
   <button type="submit" class="btn btn-secondary" name="action" value="grant">Make Administrator</button>
