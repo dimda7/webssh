@@ -24,11 +24,3 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install pytest==8.1.2 pytest-cov -r requirements.txt
       - run: pytest --cov=webssh
-      - run: mkdir -p coverage
-      - uses: tj-actions/coverage-badge-py@v2
-        with:
-          output: coverage/coverage.svg
-      - uses: JamesIves/github-pages-deploy-action@v4
-        with:
-          branch: coverage-badge
-          folder: coverage
