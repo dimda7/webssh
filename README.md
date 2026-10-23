@@ -1,9 +1,8 @@
 ## WebSSH
 
-[![python](https://github.com/huashengdun/webssh/actions/workflows/python.yml/badge.svg)](https://github.com/huashengdun/webssh/actions/workflows/python.yml)
-[![codecov](https://raw.githubusercontent.com/huashengdun/webssh/coverage-badge/coverage.svg)](https://raw.githubusercontent.com/huashengdun/webssh/coverage-badge/coverage.svg)
 ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/webssh.svg)
-![PyPI](https://img.shields.io/pypi/v/webssh.svg)
+
+> Fork of [huashengdun/webssh](https://github.com/huashengdun/webssh) with a few client-side additions and a ready-to-use HTTPS setup for Docker. See [Fork changes](#fork-changes).
 
 
 ### Introduction
@@ -20,6 +19,14 @@ A simple web application to be used as an ssh client to connect to your ssh serv
 * Terminal window resizable.
 * Auto detect the ssh server's default encoding.
 * Modern browsers including Chrome, Firefox, Safari, Edge, Opera supported.
+
+
+### Fork changes
+
+* **Remembered private key.** After a successful login the private key file (and its passphrase, if any) is saved in the browser's `localStorage` and restored into the form on the next visit. Resetting the form forgets it. Only use this on a device you trust.
+* **Copy on select.** Selecting text in the terminal copies it to the clipboard.
+* **OSC 52 clipboard.** Remote programs (tmux, vim, etc.) can set the browser clipboard through the OSC 52 escape sequence. Reading the clipboard from the server is not allowed.
+* **HTTPS in Docker.** `docker-compose.yml` serves HTTPS on port `4433` using certificates from the local `certs/` directory (see [Use Docker](#use-docker)).
 
 
 ### Preview
@@ -42,7 +49,7 @@ A simple web application to be used as an ssh client to connect to your ssh serv
 
 ### Quickstart
 
-1. Install this app, run command `pip install webssh`
+1. Install this app, run command `pip install git+https://github.com/dimda7/webssh.git` (`pip install webssh` installs the upstream version without the fork changes)
 2. Start a webserver, run command `wssh`
 3. Open your browser, navigate to `127.0.0.1:8888`
 4. Input your data, submit the form.
@@ -151,7 +158,14 @@ http://localhost:8888/?term=xterm-256color
 
 ### Use Docker
 
-Start up the app
+The compose file expects a certificate and key in `certs/` (the directory is ignored by git and docker). For a self-signed one:
+```
+mkdir -p certs
+openssl req -x509 -newkey rsa:2048 -nodes -days 365 \
+  -keyout certs/webssh.key -out certs/webssh.crt -subj "/CN=localhost"
+```
+
+Start up the app, then open `https://localhost:4433` (plain http stays on port `8888`)
 ```
 docker-compose up
 ```
