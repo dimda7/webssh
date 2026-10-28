@@ -15,7 +15,10 @@ from tornado.process import cpu_count
 from webssh.signin import (
     Session, TooManyAttempts, check_password_limited, safe_next_url
 )
-from webssh.urls import PROFILE_URL, SIGNIN_URL, SIGNOUT_URL, USERS_URL
+from webssh.saved_hosts import NameTaken, SavedHostGone
+from webssh.urls import (
+    PROFILE_URL, SAVED_HOSTS_URL, SIGNIN_URL, SIGNOUT_URL, USERS_URL
+)
 from webssh.utils import (
     is_valid_ip_address, is_valid_port, is_valid_hostname, to_bytes, to_str,
     to_int, to_ip_address, UnicodeType, is_ip_hostname, is_same_primary_domain,
@@ -355,7 +358,8 @@ class SessionMixin(object):
         namespace = super(SessionMixin, self).get_template_namespace()
         namespace.update(
             signed_in_user=self.signed_in_user, signout_url=SIGNOUT_URL,
-            users_url=USERS_URL, profile_url=PROFILE_URL
+            users_url=USERS_URL, profile_url=PROFILE_URL,
+            saved_hosts_url=SAVED_HOSTS_URL
         )
         return namespace
 
@@ -475,6 +479,11 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
         self.debug = self.settings.get('debug', False)
         self.font = self.settings.get('font', '')
         self.result = dict(id=None, status=None, encoding=None)
+        self.host_to_save = None
+
+    @property
+    def saved_hosts(self):
+        return self.settings['user_store'].saved_hosts
 
     def write_error(self, status_code, **kwargs):
         if swallow_http_errors and self.request.method == 'POST':
@@ -539,6 +548,10 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
                     )
 
     def get_args(self):
+        saved_host = self.get_argument('saved_host', u'')
+        if saved_host and self.settings.get('signin_enabled'):
+            return self.get_saved_host_args(saved_host)
+
         hostname = self.get_hostname()
         port = self.get_port()
         username = self.get_value('username')
@@ -555,11 +568,82 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
         else:
             pkey = None
 
+        name = self.get_name_to_save()
+        if name:
+            # a key is tried before the password, so it is the one to keep
+            if privatekey:
+                secret = dict(privatekey=privatekey,
+                              passphrase=passphrase or None)
+            elif password:
+                secret = dict(password=password)
+            else:
+                raise InvalidValueError(
+                    'A saved host needs a password or a private key.')
+            self.host_to_save = dict(name=name, hostname=hostname, port=port,
+                                     username=username, **secret)
+
         self.ssh_client.totp = totp
         args = (hostname, port, username, password, pkey)
         logging.debug(args)
 
         return args
+
+    def get_saved_host_args(self, value):
+        """The SSH credentials of one of the signed-in User's Saved Hosts.
+
+        Its secrets stay on the server: the browser names it by id only.
+        """
+        try:
+            host = self.saved_hosts.find(self.signed_in_user.id,
+                                         to_int(value))
+        except SavedHostGone:
+            raise InvalidValueError('Unknown saved host.')
+
+        if isinstance(self.policy, paramiko.RejectPolicy):
+            self.lookup_hostname(host.hostname, host.port)
+
+        pkey = None
+        if host.has_key:
+            try:
+                pkey = PrivateKey(host.privatekey, host.passphrase,
+                                  host.name).get_pkey_obj()
+            except InvalidValueError:
+                # its message may quote the stored passphrase
+                raise InvalidValueError(
+                    'The private key of the saved host can not be read.')
+
+        self.ssh_client.totp = self.get_argument('totp', u'')
+        return (host.hostname, host.port, host.username, host.password, pkey)
+
+    def get_name_to_save(self):
+        """The name to save the SSH credentials under, or None.
+
+        Checked before connecting, so that a Connect is never wasted on a
+        Saved Host that can not be created.
+        """
+        if not self.settings.get('signin_enabled') or \
+                not self.get_argument('save', u''):
+            return None
+        name = self.get_argument('name', u'')
+        if not name:
+            raise InvalidValueError('Name the saved host.')
+        if self.saved_hosts.is_name_taken(self.signed_in_user.id, name):
+            raise InvalidValueError('Saved host name is taken: {}'.format(
+                name))
+        return name
+
+    def save_host(self):
+        try:
+            self.saved_hosts.create(self.signed_in_user.id,
+                                    **self.host_to_save)
+        except NameTaken:
+            # created by a concurrent request while connecting
+            logging.warning('Saved host {!r} of {!r} not created, the name '
+                            'is taken'.format(self.host_to_save['name'],
+                                              self.signed_in_user.username))
+            return
+        logging.info('User {!r} saved host {!r}'.format(
+            self.signed_in_user.username, self.host_to_save['name']))
 
     def parse_encoding(self, data):
         try:
@@ -639,7 +723,11 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
         pass
 
     def get(self):
-        self.render('index.html', debug=self.debug, font=self.font)
+        saved_hosts = []
+        if self.settings.get('signin_enabled'):
+            saved_hosts = self.saved_hosts.list(self.signed_in_user.id)
+        self.render('index.html', debug=self.debug, font=self.font,
+                    saved_hosts=saved_hosts)
 
     @tornado.gen.coroutine
     def post(self):
@@ -673,6 +761,8 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
             workers[worker.id] = worker
             self.loop.call_later(options.delay, recycle_worker, worker)
             self.result.update(id=worker.id, encoding=worker.encoding)
+            if self.host_to_save:
+                self.save_host()
 
         self.write(self.result)
 

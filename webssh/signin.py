@@ -1,6 +1,7 @@
 import functools
 import json
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -13,6 +14,8 @@ import bcrypt
 import tornado.gen
 
 from tornado.process import cpu_count
+
+from webssh.saved_hosts import SavedHostStore
 
 
 # bcrypt only looks at the first 72 bytes and bcrypt>=5 refuses longer input
@@ -131,13 +134,23 @@ class UserStore(object):
     def __init__(self, path):
         self.path = path
         try:
+            self.restrict_file_mode()
             self.conn = sqlite3.connect(path)
             self.conn.row_factory = sqlite3.Row
             with self.conn:
                 self.conn.execute(SCHEMA)
                 self.upgrade_schema()
-        except sqlite3.Error as exc:
+            self.saved_hosts = SavedHostStore(self.conn)
+        except (sqlite3.Error, OSError) as exc:
             raise ConfigError('Can not open {!r}: {}'.format(path, exc))
+
+    def restrict_file_mode(self):
+        """Makes the DB file readable by webssh alone.
+
+        It holds the secrets of Saved Hosts in plaintext (ADR 0003).
+        """
+        os.close(os.open(self.path, os.O_CREAT | os.O_RDWR, 0o600))
+        os.chmod(self.path, 0o600)
 
     def upgrade_schema(self):
         existing = {row['name'] for row in

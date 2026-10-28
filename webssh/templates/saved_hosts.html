@@ -1,0 +1,24 @@
+{% extends layout.html %}
+{% block title %}Saved hosts{% end %}
+{% block content %}
+<a href="/">&larr; Connect</a>
+<h4>Saved hosts</h4>
+{% if saved_hosts %}
+<table class="table table-sm" id="saved-hosts">
+  <thead>
+    <tr><th>Name</th><th>Host</th><th>Signs in with</th></tr>
+  </thead>
+  <tbody>
+    {% for host in saved_hosts %}
+    <tr>
+      <td><a href="{{ saved_hosts_url }}/{{ host.id }}">{{ host.name }}</a></td>
+      <td>{{ host.username }}@{{ host.hostname }}:{{ host.port }}</td>
+      <td>{{ 'key set' if host.has_key else 'password set' }}</td>
+    </tr>
+    {% end %}
+  </tbody>
+</table>
+{% else %}
+<p>No saved hosts yet. Tick "Save" on the Connect form to save the host you connect to.</p>
+{% end %}
+{% end %}
