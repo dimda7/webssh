@@ -87,7 +87,7 @@ class SSHClient(paramiko.SSHClient):
             logging.info('Trying publickey 2fa')
             return self.auth_interactive(username, self.handler)
 
-        if password is not None:
+        if password:
             logging.info('Trying password authentication')
             try:
                 self._transport.auth_password(username, password)
@@ -101,7 +101,9 @@ class SSHClient(paramiko.SSHClient):
             logging.info('Trying password 2fa')
             return self.auth_interactive(username, self.handler)
 
-        assert saved_exception is not None
+        if saved_exception is None:
+            raise paramiko.AuthenticationException(
+                'No password or private key provided.')
         raise saved_exception
 
 
@@ -598,7 +600,7 @@ class IndexHandler(SignInRequiredMixin, MixinHandler,
     def ssh_connect(self, args):
         ssh = self.ssh_client
         dst_addr = args[:2]
-        logging.info('Connecting to {}:{}'.format(*dst_addr))
+        logging.info('Connecting to {}@{}:{}'.format(args[2], *dst_addr))
 
         try:
             ssh.connect(*args, timeout=options.timeout)

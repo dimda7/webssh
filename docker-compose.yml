@@ -8,6 +8,6 @@ services:
     - ./certs:/certs:ro
     - webssh-data:/data
     ports:
-    - "4433:4433"
+    - "${WSSH_PORT:-4433}:4433"
 volumes:
   webssh-data:
