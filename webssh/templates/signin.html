@@ -21,9 +21,9 @@
       <h4>Sign in to WebSSH</h4>
       <form id="signin" action="" method="post">
         <label for="username">Username</label>
-        <input class="form-control" type="text" id="username" name="username" value="" required autofocus>
+        <input class="form-control" type="text" id="username" name="username" value="" required autofocus autocomplete="username">
         <label for="password">Password</label>
-        <input class="form-control" type="password" id="password" name="password" value="" required>
+        <input class="form-control" type="password" id="password" name="password" value="" required autocomplete="current-password">
         {% module xsrf_form_html() %}
         <button type="submit" class="btn btn-primary">Sign in</button>
       </form>

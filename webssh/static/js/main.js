@@ -1016,6 +1016,12 @@ jQuery(function($){
     term_type.val(url_opts_data.term);
   }
 
+  // The credential fields are rendered readonly so that the browser does not
+  // autofill them with the WebSSH sign-in login; unlock them on first use.
+  $('#connect input[readonly]').one('focus pointerdown', function() {
+    $(this).prop('readonly', false);
+  });
+
   if (url_form_data.password === null) {
     log_status('Password via url must be encoded in base64.');
   } else {

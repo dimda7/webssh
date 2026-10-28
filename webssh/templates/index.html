@@ -57,11 +57,11 @@
         <div class="row">
           <div class="col">
             <label for="Username">Username</label>
-            <input class="form-control" type="text" id="username" name="username" value="" required>
+            <input class="form-control" type="text" id="username" name="username" value="" autocomplete="off" readonly required>
           </div>
           <div class="col">
             <label for="Password">Password</label>
-            <input class="form-control" type="password" id="password" name="password" value="">
+            <input class="form-control" type="password" id="password" name="password" value="" autocomplete="new-password" readonly>
           </div>
         </div>
         <div class="row">
@@ -71,13 +71,13 @@
           </div>
           <div class="col">
             <label for="Passphrase">Passphrase</label>
-            <input class="form-control" type="password" id="passphrase" name="passphrase" value="">
+            <input class="form-control" type="password" id="passphrase" name="passphrase" value="" autocomplete="new-password" readonly>
           </div>
         </div>
         <div class="row">
           <div class="col">
             <label for="totp">Totp (time-based one-time password)</label>
-            <input class="form-control" type="password" id="totp" name="totp" value="">
+            <input class="form-control" type="password" id="totp" name="totp" value="" autocomplete="one-time-code" readonly>
           </div>
           <div class="col">
           </div>
@@ -99,6 +99,6 @@
     <script src="static/js/bootstrap.min.js"></script>
     <script src="static/js/xterm.min.js"></script>
     <script src="static/js/xterm-addon-fit.min.js"></script>
-    <script src="static/js/main.js"></script>
+    <script src="{{ static_url('js/main.js')[1:] }}"></script>
   </body>
 </html>
