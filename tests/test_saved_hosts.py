@@ -37,8 +37,13 @@ class SavedHostsTestBase(AdminTestBase):
         # the connection limit of the next tests
         for workers in list(clients.values()):
             for worker in list(workers.values()):
-                if worker:
+                if not worker:
+                    continue
+                try:
                     worker.close(reason='test over')
+                except (EOFError, OSError):
+                    # the test SSH server has already hung up
+                    pass
         clients.clear()
         super(SavedHostsTestBase, self).tearDown()
 
