@@ -3,13 +3,20 @@ import logging
 import tornado.gen
 import tornado.web
 
-from webssh.handler import MixinHandler, SignInRequiredMixin
+from webssh.handler import (
+    DEFAULT_PORT, InvalidValueError, MixinHandler, PrivateKey,
+    SignInRequiredMixin
+)
+from webssh.saved_hosts import NameTaken, SavedHostGone
 from webssh.signin import (
     LastAdministrator, Names, Session, TooManyAttempts, UserGone,
     UsernameTaken, check_password_limited, hash_password_off_loop,
     password_error, username_error
 )
-from webssh.urls import PROFILE_URL, SIGNIN_URL, USERS_URL
+from webssh.urls import PROFILE_URL, SAVED_HOSTS_URL, SIGNIN_URL, USERS_URL
+from webssh.utils import (
+    is_valid_hostname, is_valid_ip_address, is_valid_port, to_int
+)
 
 
 LAST_ADMINISTRATOR = 'At least one active Administrator must remain'
@@ -236,4 +243,112 @@ class ProfileHandler(FormMixin, MixinHandler, tornado.web.RequestHandler):
     actions = {
         'password': change_password,
         'signout_everywhere': sign_out_everywhere,
+    }
+
+
+class SavedHostsHandler(FormMixin, MixinHandler, tornado.web.RequestHandler):
+    """The signed-in User's own Saved Hosts."""
+
+    def get(self):
+        self.render('saved_hosts.html', saved_hosts=self.settings[
+            'user_store'].saved_hosts.list(self.signed_in_user.id))
+
+
+class SavedHostHandler(FormMixin, MixinHandler, tornado.web.RequestHandler):
+    """One of the signed-in User's Saved Hosts and the actions on it.
+
+    Its secret can be replaced here but is never shown.
+    """
+
+    name_taken = 'You already have a saved host with this name'
+
+    @property
+    def store(self):
+        return self.settings['user_store'].saved_hosts
+
+    def find_host(self, host_id):
+        try:
+            return self.store.find(self.signed_in_user.id, int(host_id))
+        except SavedHostGone:
+            # someone else's Saved Host looks the same as a missing one
+            raise tornado.web.HTTPError(404)
+
+    def get(self, host_id):
+        self.render_page(self.find_host(host_id))
+
+    def render_page(self, host, error=None):
+        self.render('saved_host.html', host=host, error=error,
+                    page_url=self.request.path)
+
+    @tornado.gen.coroutine
+    def post(self, host_id):
+        host = self.find_host(host_id)
+        try:
+            error = yield self.run_action(host)
+        except SavedHostGone:
+            raise tornado.web.HTTPError(404)
+        if error:
+            self.render_page(host, error)
+        elif not self._finished:
+            self.redirect(self.request.path, status=303)
+
+    def log_action(self, action, host):
+        logging.info('User {!r} {} saved host {!r}'.format(
+            self.signed_in_user.username, action, host.name))
+
+    def change_details(self, host):
+        name = self.get_argument('name', u'')
+        hostname = self.get_argument('hostname', u'')
+        port_value = self.get_argument('port', u'')
+        port = to_int(port_value) if port_value else DEFAULT_PORT
+        username = self.get_argument('username', u'')
+        if not name:
+            return 'Name is required'
+        if not (is_valid_hostname(hostname) or
+                is_valid_ip_address(hostname)):
+            return 'Invalid hostname: {}'.format(hostname)
+        if port is None or not is_valid_port(port):
+            return 'Invalid port: {}'.format(port_value)
+        if not username:
+            return 'Username is required'
+        try:
+            self.store.update_details(self.signed_in_user.id, host.id, name,
+                                      hostname, port, username)
+        except NameTaken:
+            return self.name_taken
+        self.log_action('changed', host)
+
+    def set_password(self, host):
+        # taken verbatim: it goes to the remote host as typed
+        password = self.get_raw_argument('password')
+        if not password:
+            return 'Password is required'
+        self.store.set_password(self.signed_in_user.id, host.id, password)
+        self.log_action('set the password of', host)
+
+    def set_key(self, host):
+        files = self.request.files.get('privatekey')
+        if not files:
+            return 'Choose a private key file'
+        privatekey = self.decode_argument(files[0]['body'],
+                                          name='privatekey').strip()
+        passphrase = self.get_raw_argument('passphrase') or None
+        try:
+            PrivateKey(privatekey, passphrase).get_pkey_obj()
+        except InvalidValueError:
+            return 'Invalid private key or wrong passphrase'
+        self.store.set_key(self.signed_in_user.id, host.id, privatekey,
+                           passphrase)
+        self.log_action('set the private key of', host)
+
+    def delete(self, host):
+        self.store.delete(self.signed_in_user.id, host.id)
+        self.log_action('deleted', host)
+        self.redirect(SAVED_HOSTS_URL, status=303)
+
+    actions = {
+        'details': change_details,
+        'password': set_password,
+        'key': set_key,
+        'delete': delete,
     }

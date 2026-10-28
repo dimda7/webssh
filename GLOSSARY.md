@@ -20,6 +20,10 @@ _Avoid_: deleted, blocked, banned (being temporarily refused after too many fail
 The hostname, port, username, password, private key and TOTP code used to authenticate on a remote SSH host.
 _Avoid_: login, user
 
+**Saved Host**:
+A named set of SSH credentials, without the TOTP code, that belongs to one User and is visible only to that User. It holds either a password or a private key, never both.
+_Avoid_: bookmark, profile, connection, saved server
+
 **Sign-in**:
 Proving who you are to webssh itself, before any remote host is involved.
 _Avoid_: login, auth

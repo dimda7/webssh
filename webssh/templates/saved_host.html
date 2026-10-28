@@ -1,0 +1,70 @@
+{% extends layout.html %}
+{% block title %}{{ host.name }}{% end %}
+{% block content %}
+<a href="{{ saved_hosts_url }}">&larr; Saved hosts</a>
+<h4>{{ host.name }}</h4>
+{% if error %}
+<div id="status" style="color: red;">{{ error }}</div>
+{% end %}
+
+<h5>Host</h5>
+<form id="details" action="{{ page_url }}" method="post">
+  <div class="row">
+    <div class="col">
+      <label for="name">Name</label>
+      <input class="form-control" type="text" id="name" name="name" value="{{ host.name }}" required>
+    </div>
+    <div class="col">
+      <label for="hostname">Hostname</label>
+      <input class="form-control" type="text" id="hostname" name="hostname" value="{{ host.hostname }}" required>
+    </div>
+    <div class="col">
+      <label for="port">Port</label>
+      <input class="form-control" type="number" id="port" name="port" value="{{ host.port }}" min=1 max=65535>
+    </div>
+    <div class="col">
+      <label for="username">Username</label>
+      <input class="form-control" type="text" id="username" name="username" value="{{ host.username }}" autocomplete="off" required>
+    </div>
+  </div>
+  <input type="hidden" name="action" value="details">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-primary">Save</button>
+</form>
+
+<h5 style="margin-top: 20px;">Signs in with</h5>
+<p id="secret">{{ 'Private key: key set' if host.has_key else 'Password: password set' }}. The secret is never shown; you can only replace it.</p>
+<form id="password" action="{{ page_url }}" method="post">
+  <div class="row">
+    <div class="col">
+      <label for="password">New password</label>
+      <input class="form-control" type="password" id="password" name="password" autocomplete="new-password" required>
+    </div>
+  </div>
+  <input type="hidden" name="action" value="password">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-primary">Use this password</button>
+</form>
+<form id="key" action="{{ page_url }}" method="post" enctype="multipart/form-data">
+  <div class="row">
+    <div class="col">
+      <label for="privatekey">New private key</label>
+      <input class="form-control" type="file" id="privatekey" name="privatekey" required>
+    </div>
+    <div class="col">
+      <label for="passphrase">Passphrase</label>
+      <input class="form-control" type="password" id="passphrase" name="passphrase" autocomplete="new-password">
+    </div>
+  </div>
+  <input type="hidden" name="action" value="key">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-primary">Use this key</button>
+</form>
+
+<h5 style="margin-top: 20px;">Delete</h5>
+<form id="delete" action="{{ page_url }}" method="post">
+  <input type="hidden" name="action" value="delete">
+  {% module xsrf_form_html() %}
+  <button type="submit" class="btn btn-danger">Delete saved host</button>
+</form>
+{% end %}

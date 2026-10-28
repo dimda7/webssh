@@ -61,6 +61,8 @@ jQuery(function($){
       url_opts_data = {},
       validated_form_data,
       pending_key,
+      // with sign-in, Saved Hosts keep private keys instead of the browser
+      signed_in = $('#connect').data('signed-in') === 'yes',
       event_origin,
       hostname_tester = /((^\s*((([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5]))\s*$)|(^\s*((([0-9A-Fa-f]{1,4}:){7}([0-9A-Fa-f]{1,4}|:))|(([0-9A-Fa-f]{1,4}:){6}(:[0-9A-Fa-f]{1,4}|((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){5}(((:[0-9A-Fa-f]{1,4}){1,2})|:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3})|:))|(([0-9A-Fa-f]{1,4}:){4}(((:[0-9A-Fa-f]{1,4}){1,3})|((:[0-9A-Fa-f]{1,4})?:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){3}(((:[0-9A-Fa-f]{1,4}){1,4})|((:[0-9A-Fa-f]{1,4}){0,2}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){2}(((:[0-9A-Fa-f]{1,4}){1,5})|((:[0-9A-Fa-f]{1,4}){0,3}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(([0-9A-Fa-f]{1,4}:){1}(((:[0-9A-Fa-f]{1,4}){1,6})|((:[0-9A-Fa-f]{1,4}){0,4}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:))|(:(((:[0-9A-Fa-f]{1,4}){1,7})|((:[0-9A-Fa-f]{1,4}){0,5}:((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}))|:)))(%.+)?\s*$))|(^\s*((?=.{1,255}$)(?=.*[A-Za-z].*)[0-9A-Za-z](?:(?:[0-9A-Za-z]|\b-){0,61}[0-9A-Za-z])?(?:\.[0-9A-Za-z](?:(?:[0-9A-Za-z]|\b-){0,61}[0-9A-Za-z])?)*)\s*$)/;
 
@@ -415,7 +417,7 @@ jQuery(function($){
     }
 
     // the server has authenticated, so the key is known to work
-    if (key) {
+    if (key && !signed_in) {
       store_key(key);
     }
 
@@ -960,6 +962,39 @@ jQuery(function($){
 
   wssh.connect = connect;
 
+
+  function connect_saved_host(event) {
+    // the server fills in the SSH credentials, the page only names the host
+    var form = document.querySelector(form_id),
+        saved_host = $(event.currentTarget);
+
+    event.preventDefault();
+    if (state !== DISCONNECTED) {
+      console.log(messages[state]);
+      return;
+    }
+
+    pending_key = undefined;
+    state = CONNECTING;
+    default_title = saved_host.attr('title');
+    status.text('');
+    button.prop('disabled', true);
+
+    $.ajax({
+        url: form.action,
+        type: 'post',
+        data: {
+          saved_host: saved_host.data('saved-host'),
+          totp: $('#totp').val(),
+          term: term_type.val(),
+          _xsrf: form.querySelector('input[name="_xsrf"]').value
+        },
+        complete: ajax_complete_callback
+    });
+  }
+
+  $('.saved-host').click(connect_saved_host);
+
   $(form_id).submit(function(event){
     event.preventDefault();
     connect();
@@ -1030,7 +1065,12 @@ jQuery(function($){
       connect(url_form_data);
     } else {
       restore_items(fields);
-      restore_key();
+      if (signed_in) {
+        // remembered before Saved Hosts existed
+        forget_key();
+      } else {
+        restore_key();
+      }
       form_container.show();
     }
   }
