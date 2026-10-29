@@ -8,19 +8,5 @@ services:
     - webssh-data:/data
     ports:
     - "${WSSH_PORT:-4433}:4433"
-  connbar:
-    build: .
-    image: webssh-connbar
-    container_name: webssh-connbar
-    restart: unless-stopped
-    command: ["python", "run.py", "--certfile=/certs/webssh.crt", "--keyfile=/certs/webssh.key", "--sslport=4433", "--authdb=/data/users.db", "--xheaders=False"]
-    env_file: .env
-    volumes:
-    - ./certs:/certs:ro
-    - webssh-connbar-data:/data
-    ports:
-    - "${WSSH_CONNBAR_PORT:-4434}:4433"
 volumes:
   webssh-data:
-  webssh-connbar-data:
-    external: true
