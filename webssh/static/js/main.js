@@ -44,6 +44,7 @@ jQuery(function($){
       style = {},
       default_title = 'WebSSH',
       title_element = document.querySelector('title'),
+      connection_bar = $('#connection-bar'),
       form_id = '#connect',
       debug = document.querySelector(form_id).noValidate,
       custom_font = document.fonts ? document.fonts.values().next().value : undefined,
@@ -227,7 +228,7 @@ jQuery(function($){
     }
 
     var cols = parseInt(window.innerWidth / style.width, 10) - 1;
-    var rows = parseInt(window.innerHeight / style.height, 10);
+    var rows = parseInt((window.innerHeight - connection_bar.outerHeight()) / style.height, 10);
     return {'cols': cols, 'rows': rows};
   }
 
@@ -692,12 +693,18 @@ jQuery(function($){
     });
 
     sock.onopen = function() {
+      $('#connection-target').text(default_title);
+      $('body').addClass('connected');
       term.open(terminal);
       toggle_fullscreen(term);
       update_font_family(term);
+      term.write('\x1b[1;32mConnected to ' + default_title + '\x1b[0m\r\n');
       term.focus();
       state = CONNECTED;
       title_element.text = url_opts_data.title || default_title;
+      $('#disconnect').off('click').click(function() {
+        sock.close();
+      });
       if (url_opts_data.command) {
         setTimeout(function () {
           sock.send(JSON.stringify({'data': url_opts_data.command+'\r'}));
@@ -714,6 +721,7 @@ jQuery(function($){
     };
 
     sock.onclose = function(e) {
+      $('body').removeClass('connected');
       term.dispose();
       term = undefined;
       sock = undefined;
@@ -976,7 +984,7 @@ jQuery(function($){
 
     pending_key = undefined;
     state = CONNECTING;
-    default_title = saved_host.attr('title');
+    default_title = $.trim(saved_host.text()) + ' (' + saved_host.attr('title') + ')';
     status.text('');
     button.prop('disabled', true);
 
