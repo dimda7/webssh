@@ -1011,6 +1011,28 @@ jQuery(function($){
   $(form_id).on('reset', forget_key);
 
 
+  function show_password(toggle, shown) {
+    $(toggle.data('toggle-password')).attr('type', shown ? 'text' : 'password');
+    toggle.attr({
+      'aria-pressed': shown ? 'true' : 'false',
+      'aria-label': shown ? 'Hide password' : 'Show password',
+      'title': shown ? 'Hide password' : 'Show password'
+    });
+  }
+
+  $('.password-toggle').click(function() {
+    var toggle = $(this);
+    show_password(toggle, toggle.attr('aria-pressed') !== 'true');
+  });
+
+  // hide the password again before the form is sent or cleared
+  $(form_id).on('submit reset', function() {
+    $('.password-toggle').each(function() {
+      show_password($(this), false);
+    });
+  });
+
+
   function cross_origin_connect(event)
   {
     console.log(event.origin);
