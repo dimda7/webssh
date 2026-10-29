@@ -25,6 +25,38 @@
         margin-left: 5px;
       }
 
+      #connection-bar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 24px;
+        padding: 0 10px;
+        z-index: 256;
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        background: #222;
+        color: #8fdf8f;
+        font-family: monospace;
+        font-size: 13px;
+      }
+
+      #connection-bar .btn {
+        margin: 0;
+        padding: 0 6px;
+        font-size: 12px;
+        line-height: 18px;
+      }
+
+      body.connected #connection-bar {
+        display: flex;
+      }
+
+      body.connected .xterm.fullscreen {
+        top: 24px;
+      }
+
       {% include nav-style.html %}
       {% if font.family %}
       @font-face {
@@ -40,6 +72,11 @@
   </head>
   <body>
     <div id="waiter" style="display: none"> Connecting ... </div>
+
+    <div id="connection-bar">
+      <span id="connection-target"></span>
+      <button type="button" id="disconnect" class="btn btn-outline-light">Disconnect</button>
+    </div>
 
     <div class="container form-container" style="display: none">
       {% include nav.html %}
